@@ -1,0 +1,84 @@
+ID Sesi: 9e74b8af-d313-4a51-81f2-e362bdd7e859
+
+================================================================================
+RINGKASAN PERBAIKAN BUG (FIX BUGS) - DIPERBARUI
+================================================================================
+1. Perbaikan Syntax Error CSS Inline (MealTracker.jsx)
+   - Memperbaiki properti 'justifyOrigin: "center"' yang salah menjadi 'justifyContent: "center"' pada panel kamera/galeri asupan makanan.
+2. Pembersihan Emoji Dekoratif UI ke Lucide Icons
+   - Mengganti seluruh emoji dekoratif antarmuka di Dashboard.jsx, MealTracker.jsx, KeuanganTab.jsx, dan WorkoutSession.jsx dengan Lucide React Icons.
+   - Ikon yang diintegrasikan: ChefHat, Sparkles, Banknote, BarChart2, TrendingUp, TrendingDown, CreditCard, Flame, Shield, Swords, Trophy, Wind, Gift, Camera, CheckCircle2, dll.
+   - Menghapus emoji statis seperti ⚔️, 🏆, 💨, 🎁, 📷, dan 🛑 dari petunjuk tempo calisthenics.
+3. Transisi Unit Pelacakan Air Minum (useDashboardStore.js)
+   - Mengubah unit asupan air minum harian dari satuan "gelas" (cups) ke milliliters ("ml").
+   - Menetapkan batas target harian default sebesar 2000ml dengan opsi kelipatan penambahan botol minum 250ml dan 700ml.
+   - Memastikan reset otomatis 'waterMlToday' ke 0 setiap hari baru dimulai.
+4. Perbaikan Layar Blank Hitam pada Tab Belajar (BelajarTab.jsx)
+   - Mengatasi error runtime 'ReferenceError: Moon is not defined' dengan mengimpor komponen ikon Moon dari lucide-react.
+   - MEMPERBAIKI crash runtime 'TypeError: Cannot read properties of undefined' akibat pemanggilan .toUpperCase() pada nama subjek aktif yang bernilai undefined saat data subjek kosong/tidak sinkron. Mendefinisikan 'activeSubj' terpusat di level atas komponen dengan fallback subjek default.
+5. Perbaikan Izin Kamera & Fallback Otomatis (WorkoutSession.jsx)
+   - Mengatasi pemblokiran API kamera (getUserMedia) pada protokol HTTP non-localhost (insecure origin) di HP Android dengan dialog penjelasan yang cozy.
+   - Deteksi izin ditolak (NotAllowedError) dan kegagalan perangkat (NotFoundError) secara proaktif, lalu otomatis beralih ke Mode Repetisi Manual yang ergonomis.
+
+================================================================================
+FITUR BARU YANG TELAH DIIMPLEMENTASIKAN
+================================================================================
+1. Cozy Lofi Radio & Ambient Mixer (BelajarTab.jsx)
+   - Mengganti soundscape ambient lama dengan live streaming radio Lofi online (Zeno.fm stream).
+   - Menambahkan slider mixer volume audio prosedural untuk Hujan, Obrolan Kafe, dan Denting Cangkir secara real-time.
+   - Mengatasi kebijakan web browser autoplay dengan tombol interaksi "Seduh Suara Latar/Ambient" untuk mengaktifkan AudioContext.
+2. Fitur Ekspor/Impor Data Terpusat (Backup & Restore Offline JSON - Settings.jsx)
+   - Menyediakan fitur cadangan penuh mandiri yang mengekspor seluruh basis data localStorage (mood, koin, level RPG, asupan air, dll) ke dalam berkas .json sekali klik.
+   - Menyediakan antarmuka unggah untuk mengimpor kembali berkas cadangan JSON tersebut guna memulihkan status dashboard secara instan ke browser/perangkat apa pun.
+3. Papan Misi Harian Lintas Fitur Terpadu (HomeTab.jsx & useDashboardStore.js)
+   - Menambahkan Papan Misi Harian baru yang menyatukan aktivitas harian lintas fitur (belajar, olahraga, hidrasi, keuangan, RPG).
+   - ROMBAK TOTAL: Mengubah tampilan list vertikal papan misi harian menjadi deretan ikon bulat horizontal (Flex Row) game-like yang hemat ruang dengan indikator status warna, glowing notification, overlay checkmark, serta panel detail misi yang dinamis (click-to-navigate / claim reward).
+4. Pengingat Hidrasi Otomatis (Settings.jsx & App.jsx)
+   - Menyediakan pengaturan interval pengingat minum air otomatis (tiap 1 jam / 2 jam sekali) yang meminta izin browser Notification API secara dinamis.
+   - Menjalankan background timer pengingat yang cozy untuk memicu push notification di desktop/perangkat pengguna.
+5. Grafik Analisis Nutrisi Mingguan SVG (MealTracker.jsx)
+   - Membuat visualisasi grafik batang SVG dinamis (tanpa dependensi pustaka luar yang berat) untuk asupan kalori 7 hari terakhir.
+   - Menampilkan garis pembatas target kalori harian untuk membandingkan secara visual pencapaian bulking calisthenics pengguna.
+6. Integrasi Standard Progressive Web App / PWA (index.html & manifest.json)
+   - Membuat konfigurasi manifest.json dan menyematkan meta tag PWA di index.html.
+   - Memungkinkan instalasi instan web app ini langsung ke layar utama Android (Add to Home Screen) dengan tampilan standalone layar penuh tanpa frame browser.
+7. Rombak Total UI & Layout Sesi Workout (WorkoutSession.jsx)
+   - Mengubah layout vertikal tunggal yang berantakan menjadi Grid 2-Kolom responsif (sisi kiri untuk Visualizer AI + RPG Boss, sisi kanan untuk kontrol reps & antrean gerakan).
+   - Mendesain Reps Controller besar & ergonomis (tombol lingkar + dan - berdiameter besar dengan teks reps 6xl yang sangat mudah diakses/ditekan saat pengguna sedang sibuk berolahraga).
+8. Kustomisasi Ikon Aplikasi APK Android (android/mipmap-*)
+   - Membuat logo kustom Cozy Cafe Pixel Art (kucing oranye barista dengan cangkir kopi mengepul hangat) menggunakan AI Image Generator.
+   - Menjalankan generator Capacitor Assets untuk secara otomatis memproses dan menempatkan launcher icons & splash screens yang baru di direktori native Android.
+
+================================================================================
+HASIL BUILD APK ANDROID NATIVE
+================================================================================
+- Berhasil memasang Android SDK API 34, Platform-tools, dan Build-tools secara headless.
+- Mengunduh dan memasang OpenJDK 21 portabel secara mandiri di direktori pengguna untuk menyediakan compiler Java ('javac') yang kompatibel.
+- Berhasil mengompilasi APK debug via Gradle Wrapper lokal dengan perintah 'JAVA_HOME=/home/tegoeh/java-21 ./android/gradlew -p android assembleDebug'.
+- File APK hasil kompilasi (terintegrasi dengan Ikon Kustom terbaru):
+  * Lokasi Asli: /home/tegoeh/cozy-dashboard/android/app/build/outputs/apk/debug/app-debug.apk
+  * Lokasi Ringkas (Disalin): /home/tegoeh/cozy-dashboard/cozy-dashboard.apk dan /home/tegoeh/cozy-dashboard.apk
+  * Ukuran File: 4.1 MB
+
+================================================================================
+HASIL TINJAUAN KESELURUHAN FITUR APLIKASI
+================================================================================
+1. Tab Utama (HomeTab): Widget ringkasan harian, interaksi mood kucing peliharaan, Cozy Shop (dekorasi ruangan), pencapaian (Achievements), status level RPG, papan misi harian lintas fitur berbentuk ikon bulat interaktif, dan pelacak air minum (ml).
+2. Tab Belajar (BelajarTab): Timer fokus Pomodoro/Stopwatch, daftar subjek belajar kustom (bebas crash), Lofi radio online, dan mixer ambient soundscape (Hujan/Kafe/Cangkir).
+3. Tab Olahraga (WorkoutTab & WorkoutSession): Jadwal calisthenics (dapat tersinkron ke Google Sheets), metronom visual & audio tempo calisthenics, AI pose webcam tracker (dengan penanganan insecure origin yang aman), RPG boss battle dengan reward XP/Coin, dan catatan Personal Records (PR).
+4. Tab Keuangan (KeuanganTab): Kelola dompet/e-wallet virtual pixel art, pelacak utang/piutang, log transaksi masuk/keluar, tren pertumbuhan saldo gabungan (SVG), dan asisten prediksi finansial AI.
+5. Tab Gizi (GiziTab & MealTracker): Pemantauan kalori/protein harian, tren asupan kalori minggu (SVG), pencatatan makanan dengan estimasi gizi otomatis (opsional via Apps Script/AI).
+6. Tab Riwayat (History): Kalender log terintegrasi untuk melacak semua histori belajar, latihan, makanan, dan finansial.
+
+================================================================================
+REKOMENDASI FITUR BARU UNTUK MASA DEPAN
+================================================================================
+1. RPG Equipment Shop & Combat Stats (Weapon, Armor, Shield)
+   - Menambahkan item perlengkapan tempur ke Toko RPG. Pedang (menambah damage ke bos per set workout), Perisai (mengurangi damage bos), dan Baju Besi (meningkatkan perolehan bonus XP).
+   - Menampilkan perlengkapan aktif pada statistik hero di Dashboard secara visual.
+2. Feeding & Pet Care Interactive System
+   - Menambahkan makanan/snack kucing (Catnip, Ikan Salmon, Biskuit) di toko untuk dibeli dengan Cozy Coins.
+   - Memberi makan kucing akan meningkatkan mood kucing secara instan ke level tertinggi dan memicu teks respons kucing yang lebih ekspresif dan ramah.
+3. Cozy Gratitude Journal (Buku Harian Refleksi)
+   - Menambahkan kolom refleksi harian sederhana di mana pengguna menuliskan 3 hal yang disyukuri hari ini.
+   - Menyimpan jurnal harian memberikan imbalan koin kecil untuk mendorong kesehatan mental yang positif.

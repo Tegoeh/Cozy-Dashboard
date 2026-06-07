@@ -1,0 +1,584 @@
+@import "tailwindcss";
+
+@theme {
+  --color-zinc-950: #0f0c0b;       /* Espresso Gelap (Night Espresso) */
+  --color-zinc-900: #181311;       /* Mocha Dark */
+  --color-zinc-850: #211b18;       /* Light Mocha */
+  --color-zinc-800: #29201c;       /* Warm Cocoa Border */
+  --color-zinc-700: #3d302a;       /* Coffee Roast */
+  --color-zinc-600: #57463f;       /* Ground Coffee */
+  --color-zinc-500: #786960;       /* Coffee Powder */
+  --color-zinc-400: #baaca3;       /* Soft Latte Gray */
+  --color-zinc-300: #d6cbc4;       /* Warm Cream */
+  --color-zinc-200: #f5ece8;       /* Warm Vanilla Cream */
+  --color-zinc-100: #ffffff;
+  
+  --color-lime-500: #92b097;       /* Sage Green Matcha */
+  --color-lime-400: #a9c5ae;       /* Light Sage */
+  --color-lime-950: #0f1c12;       /* Deep Forest Sage */
+}
+
+/* Reset & Base Styles */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+  image-rendering: pixelated;
+}
+
+:root {
+  /* Font Stack: Plus Jakarta Sans untuk layout modern minimalis, VT323 untuk sentuhan pixel art cozy */
+  --font-modern: 'Plus Jakarta Sans', sans-serif;
+  --font-pixel: 'VT323', monospace;
+  
+  /* Dark Cozy Cafe (Night Espresso Palette) */
+  --bg-dark: #0f0c0b;       /* Darkest Espresso Bean */
+  --bg-card: #181311;       /* Mocha Dark */
+  --bg-card-hover: #211b18; /* Light Mocha */
+  --border-color: #29201c;  /* Warm Cocoa Border */
+  --text-primary: #f5ece8;  /* Warm Vanilla Cream */
+  --text-secondary: #baaca3;/* Soft Latte Gray */
+  --text-muted: #786960;    /* Coffee Powder */
+  
+  /* Soft Cozy Accents */
+  --color-primary: #a39081;  /* Milk Tea Brown */
+  --color-study: #92b097;    /* Cozy Matcha Sage */
+  --color-income: #a2c7b5;   /* Pastel Mint */
+  --color-expense: #e7b5b0;  /* Pastel Terracotta Peach */
+  --color-debt: #eecda3;     /* Warm Caramel Honey */
+  --color-balance: #9ec5d9;  /* Pastel Soft Blue */
+}
+
+body {
+  font-family: var(--font-modern);
+  background-color: var(--bg-dark);
+  color: var(--text-primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+  line-height: 1.5;
+  background-image: 
+    radial-gradient(circle at 10% 20%, rgba(146, 176, 151, 0.03) 0%, transparent 40%),
+    radial-gradient(circle at 90% 80%, rgba(238, 205, 163, 0.03) 0%, transparent 40%);
+  background-attachment: fixed;
+}
+
+/* App Container (Mobile viewport limit) */
+.app-container {
+  max-width: 480px;
+  margin: 0 auto;
+  min-height: 100vh;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-dark);
+  border-left: 1px solid rgba(255, 255, 255, 0.03);
+  border-right: 1px solid rgba(255, 255, 255, 0.03);
+  padding-bottom: 90px; /* Space for floating bottom nav */
+  transition: max-width 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.app-container.workout-mode {
+  max-width: 600px; /* Lebih lebar agar UI Dashboard Workout & RPG muat nyaman */
+}
+
+.app-container.active-session {
+  max-width: 100% !important; /* Layar penuh saat latihan video AI aktif */
+  padding-bottom: 0 !important;
+  border-left: none !important;
+  border-right: none !important;
+}
+
+/* Header Styles */
+.header {
+  padding: 20px 16px 12px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background-color: rgba(15, 12, 11, 0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.logo-section h1 {
+  font-family: var(--font-pixel);
+  font-size: 2.2rem;
+  font-weight: normal;
+  color: var(--color-debt);
+  letter-spacing: 0.5px;
+}
+
+.logo-section p {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+  margin-top: -2px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Floating Bottom Navigation (Modern Minimalist style) */
+.bottom-nav {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(100% - 32px);
+  max-width: 448px;
+  height: 64px;
+  background: rgba(24, 19, 17, 0.85);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  z-index: 1000;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding-bottom: 8px;
+  flex: 1;
+  height: 100%;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-family: var(--font-modern);
+  font-weight: 600;
+  font-size: 0.72rem;
+  gap: 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: color 0.2s ease, transform 0.2s ease;
+}
+
+.nav-item:active {
+  transform: scale(0.95);
+}
+
+.nav-item.active {
+  color: var(--text-primary);
+}
+
+.nav-item.active-study {
+  color: var(--color-study);
+}
+
+.nav-item.active-finance {
+  color: var(--color-debt);
+}
+
+/* Card Styles (Modern Minimalist with subtle warmth) */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 18px;
+  padding: 16px;
+  margin: 12px 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.card-title-retro {
+  font-family: var(--font-pixel);
+  font-size: 1.4rem;
+  font-weight: normal;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Layout Content */
+.view-content {
+  flex: 1;
+  padding: 8px 0;
+  animation: fadeIn 0.25s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  gap: 4px;
+  border: 1px solid transparent;
+}
+
+.badge-study { color: var(--color-study); background: rgba(146, 176, 151, 0.1); border-color: rgba(146, 176, 151, 0.2); }
+.badge-income { color: var(--color-income); background: rgba(162, 199, 181, 0.1); border-color: rgba(162, 199, 181, 0.2); }
+.badge-expense { color: var(--color-expense); background: rgba(231, 181, 176, 0.1); border-color: rgba(231, 181, 176, 0.2); }
+.badge-debt { color: var(--color-debt); background: rgba(238, 205, 163, 0.1); border-color: rgba(238, 205, 163, 0.2); }
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 16px;
+  border-radius: 12px;
+  font-family: var(--font-modern);
+  font-weight: 600;
+  font-size: 0.8rem;
+  gap: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn:active {
+  transform: scale(0.96);
+}
+
+.btn-primary { background: var(--color-primary); color: var(--bg-dark); border-color: var(--color-primary); }
+.btn-study { background: var(--color-study); color: var(--bg-dark); border-color: var(--color-study); }
+.btn-success { background: var(--color-income); color: var(--bg-dark); border-color: var(--color-income); }
+.btn-outline { background: transparent; border-color: var(--border-color); color: var(--text-primary); }
+
+/* Form Elements */
+.form-group {
+  margin-bottom: 12px;
+}
+
+.form-group label {
+  display: block;
+  font-family: var(--font-modern);
+  font-weight: 600;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.form-control {
+  width: 100%;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  color: white;
+  font-family: var(--font-modern);
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.form-control:focus {
+  border-color: var(--text-secondary);
+}
+
+select.form-control {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23baaca3'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 16px;
+  padding-right: 32px;
+}
+
+/* Wallet Grid */
+.wallet-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin: 12px 16px;
+}
+
+.wallet-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.wallet-details p:first-child {
+  font-family: var(--font-modern);
+  font-weight: 500;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+
+.wallet-details p:last-child {
+  font-family: var(--font-pixel);
+  font-size: 1.4rem;
+  color: var(--text-primary);
+}
+
+/* Modern Timer Display */
+.timer-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin: 20px 0;
+}
+
+.timer-pixel-box {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 24px 20px;
+  text-align: center;
+  width: 220px;
+  box-shadow: inset 0 2px 8px rgba(0,0,0,0.4);
+}
+
+.timer-time {
+  font-family: var(--font-pixel);
+  font-size: 3.25rem;
+  color: var(--text-primary);
+  line-height: 1;
+}
+
+.timer-label {
+  font-family: var(--font-modern);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-top: 6px;
+}
+
+/* Modals & Overlays */
+.scanner-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(15, 12, 11, 0.7);
+  backdrop-filter: blur(8px);
+  z-index: 1100;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.scanner-modal {
+  width: 100%;
+  max-width: 480px;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border-color);
+  border-top-left-radius: 28px;
+  border-top-right-radius: 28px;
+  padding: 24px 16px 36px 16px;
+  box-shadow: 0 -10px 40px rgba(0,0,0,0.5);
+  animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.pixel-loading {
+  font-family: var(--font-pixel);
+  font-size: 1.6rem;
+  color: var(--text-secondary);
+  animation: blink 1.2s step-end infinite;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+/* Custom Grid Utilities */
+.flex-row-between {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.text-amount {
+  font-family: var(--font-pixel);
+  font-size: 1.2rem;
+}
+
+/* Cozy Cafe Layout Grid & Flex Utilities */
+.cozy-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.cozy-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.cozy-flex-col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cozy-flex-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.cozy-progress-container {
+  width: 100%;
+  height: 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  margin-top: 4px;
+}
+
+.cozy-progress-bar {
+  height: 100%;
+  background: var(--color-study);
+  border-radius: 6px;
+  transition: width 0.3s ease;
+}
+
+.cozy-avatar-box {
+  width: 50px;
+  height: 50px;
+  background: rgba(146, 176, 151, 0.1);
+  border: 1px solid var(--color-study);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-study);
+  flex-shrink: 0;
+}
+
+/* Sub-tab Navigation Cozy Cafe Style */
+.cozy-sub-nav {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(24, 19, 17, 0.4);
+}
+
+.cozy-sub-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-family: var(--font-modern);
+  font-weight: 600;
+  font-size: 0.75rem;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.cozy-sub-tab-btn:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+
+.cozy-sub-tab-btn.active {
+  background: var(--color-study);
+  color: var(--bg-dark);
+  border-color: var(--color-study);
+}
+
+/* Bento Grid Layout - Dioptimalkan untuk wadah mobile-first 480px */
+.cozy-bento-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 12px 16px;
+}
+
+/* Settings Modal Popup Styles */
+.settings-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(15, 12, 11, 0.75);
+  backdrop-filter: blur(10px);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: cozy-modal-fade-in 0.2s ease-out;
+}
+
+.settings-modal-content {
+  width: 100%;
+  max-width: 480px;
+  background: linear-gradient(to bottom right, #181311, #0f0c0b);
+  border: 2px solid var(--border-color);
+  border-radius: 24px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.85);
+  max-height: 90vh;
+  overflow-y: auto;
+  animation: cozy-modal-slide-up 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  /* Custom scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color) transparent;
+}
+
+.settings-modal-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.settings-modal-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.settings-modal-content::-webkit-scrollbar-thumb {
+  background-color: var(--border-color);
+  border-radius: 3px;
+}
+
+@keyframes cozy-modal-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes cozy-modal-slide-up {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+

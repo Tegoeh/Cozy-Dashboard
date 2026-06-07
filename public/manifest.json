@@ -1,0 +1,16 @@
+{
+  "short_name": "CozyCafe",
+  "name": "Cozy Cafe Dashboard",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#121214",
+  "theme_color": "#92b097",
+  "display": "standalone",
+  "orientation": "portrait"
+}

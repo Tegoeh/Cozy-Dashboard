@@ -1,0 +1,5 @@
+{
+  "appId": "com.cozy.dashboard",
+  "appName": "Cozy Dashboard",
+  "webDir": "dist"
+}

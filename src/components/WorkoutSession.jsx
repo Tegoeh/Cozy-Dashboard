@@ -1,0 +1,2001 @@
+import { useState, useEffect, useRef } from 'react';
+import { 
+  Dumbbell, Play, CheckCircle2, ChevronRight, RefreshCw, Volume2, 
+  VolumeX, ArrowLeft, FastForward, Mic, MicOff, Award, 
+  Sparkles, Weight, ArrowUpCircle, ArrowDownCircle, Coins, Shield, AlertTriangle,
+  Swords, Trophy, Wind, Gift, Camera
+} from 'lucide-react';
+import { 
+  findExerciseInProgression, 
+  mapExerciseToPRCategory 
+} from '../utils/progressionDb';
+
+export default function WorkoutSession({ 
+  day, 
+  workoutList, 
+  onFinishWorkout, 
+  onCancelWorkout, 
+  loading,
+  personalRecords = { pullup: 0, pushup: 0, dips: 0, lsit: 0, plank: 0, handstand: 0 },
+  onUpdatePR = () => {},
+  weight = 45,
+  weightHistory = [],
+  progressHistory = [],
+  onReplaceJadwalExercise = () => {},
+  onRewardRPG = () => {},
+  rpgEquipped = { weapon: null, armor: null, shield: null },
+  onUpdateQuestProgress = () => {}
+}) {
+  const [sessionPhase, setSessionPhase] = useState('warmup'); // 'warmup' | 'workout' | 'cooldown' | 'finish'
+
+  // RPG Boss Battle States
+  const BOSSES = [
+    { name: "Goblin", maxHp: 30, hp: 30, xpReward: 50, coinsReward: 20, badge: "Goblin Hunter", icon: "🔰", color: "bg-red-500", attack: 8 },
+    { name: "Troll", maxHp: 60, hp: 60, xpReward: 150, coinsReward: 50, badge: "Troll Slayer", icon: "👹", color: "bg-amber-600", attack: 15 },
+    { name: "Golem", maxHp: 100, hp: 100, xpReward: 300, coinsReward: 100, badge: "Golem Breaker", icon: "🗿", color: "bg-blue-600", attack: 25 },
+    { name: "Dragon", maxHp: 180, hp: 180, xpReward: 600, coinsReward: 250, badge: "Dragon Slayer", icon: "🐉", color: "bg-purple-600", attack: 40 }
+  ];
+
+  const [selectedBossIdx, setSelectedBossIdx] = useState(0);
+  const [bossHp, setBossHp] = useState(30);
+  const [playerHp, setPlayerHp] = useState(100);
+  const [battleLog, setBattleLog] = useState(["Pertarungan akan dimulai. Bersiaplah!"]);
+  const [customReps, setCustomReps] = useState({});
+  const [damageDealtTotal, setDamageDealtTotal] = useState(0);
+  const [rewardsClaimed, setRewardsClaimed] = useState(false);
+
+  const [currentExerciseIdx, setCurrentExerciseIdx] = useState(0);
+  const [currentSet, setCurrentSet] = useState(1);
+  const [isResting, setIsResting] = useState(false);
+  const [restTimeLeft, setRestTimeLeft] = useState(0);
+  const [isSoundEnabled, setIsSoundEnabled] = useState(true);
+  const [isVoiceEnabled, setIsVoiceEnabled] = useState(true);
+  const [notes, setNotes] = useState('');
+  const [showDetails, setShowDetails] = useState(false);
+
+  // States untuk Auto-detect PR dan Up-level
+  const parseTargetReps = (repsString) => {
+    if (!repsString) return 10;
+    const matches = repsString.match(/\d+/g);
+    if (matches && matches.length > 0) {
+      const numbers = matches.map(Number);
+      return Math.max(...numbers);
+    }
+    return 10;
+  };
+
+  const [performanceData, setPerformanceData] = useState(() => {
+    const initial = {};
+    workoutList.forEach((ex, idx) => {
+      initial[idx] = parseTargetReps(ex.Reps);
+    });
+    return initial;
+  });
+
+  const [upgradedExercises, setUpgradedExercises] = useState({});
+  const [activeUpgradeInfo, setActiveUpgradeInfo] = useState(null);
+
+
+
+  // State baru untuk Metronom Tempo Training
+  const [isMetronomeEnabled, setIsMetronomeEnabled] = useState(false);
+  const [tempoEccentric, setTempoEccentric] = useState(3);
+  const [tempoIsometricBottom, setTempoIsometricBottom] = useState(1);
+  const [tempoConcentric, setTempoConcentric] = useState(1);
+  const [tempoIsometricTop, setTempoIsometricTop] = useState(0);
+  const [metronomeSeconds, setMetronomeSeconds] = useState(0);
+
+  function speakText(text) {
+    if (isVoiceEnabled && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'id-ID';
+        utterance.rate = 1.15;
+        window.speechSynthesis.speak(utterance);
+      } catch (e) {
+        console.warn("Speech synthesis failed:", e);
+      }
+    }
+  }
+  
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraLoading, setCameraLoading] = useState(false);
+  const [cameraError, setCameraError] = useState(null);
+  const [jointAngle, setJointAngle] = useState(180);
+  const [poseState, setPoseState] = useState('up');
+
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const activeCameraRef = useRef(null);
+  const activePoseRef = useRef(null);
+  const poseStateRef = useRef('up');
+  const lastFormWarningTimeRef = useRef(0);
+  const [formWarningText, setFormWarningText] = useState("");
+
+  // Automatic clean up camera on unmount
+  useEffect(() => {
+    return () => {
+      if (activeCameraRef.current) {
+        try { activeCameraRef.current.stop(); } catch (err) { console.debug(err); }
+      }
+      if (activePoseRef.current) {
+        try { activePoseRef.current.close(); } catch (err) { console.debug(err); }
+      }
+      const fallbackVideo = document.getElementById('ai-pose-video-fallback');
+      if (fallbackVideo) {
+        try {
+          fallbackVideo.pause();
+          if (fallbackVideo.srcObject) {
+            const tracks = fallbackVideo.srcObject.getTracks();
+            tracks.forEach(track => track.stop());
+          }
+        } catch (err) {
+          console.debug(err);
+        }
+        fallbackVideo.remove();
+      }
+    };
+  }, []);
+
+  // Voice feedback pada pergantian phase latihan (AI Workout Coach)
+  useEffect(() => {
+    if (sessionPhase === 'warmup') {
+      speakText("Selamat datang di sesi latihan. Mari lakukan pemanasan terlebih dahulu untuk menghindari cedera.");
+    } else if (sessionPhase === 'workout') {
+      speakText(`Sesi latihan inti dimulai. Gerakan pertama adalah ${activeExercise?.NamaGerakan || ''}. Lakukan sebanyak ${activeExercise?.Reps || ''}.`);
+    } else if (sessionPhase === 'cooldown') {
+      speakText("Latihan inti selesai. Mari masuk ke sesi pendinginan untuk menenangkan otot dan sendi.");
+    } else if (sessionPhase === 'finish') {
+      speakText("Selamat! Seluruh rangkaian latihan hari ini telah selesai. Rekor baru Anda telah dicatat.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionPhase]);
+
+  const calculateAngle = (a, b, c) => {
+    if (!a || !b || !c) return 180;
+    const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+    let angle = Math.abs((radians * 180.0) / Math.PI);
+    if (angle > 180.0) {
+      angle = 360.0 - angle;
+    }
+    return Math.round(angle);
+  };
+
+  const stopCameraTracker = () => {
+    if (activeCameraRef.current) {
+      try {
+        activeCameraRef.current.stop();
+      } catch (e) {
+        console.warn("Error stopping camera:", e);
+      }
+      activeCameraRef.current = null;
+    }
+    if (activePoseRef.current) {
+      try {
+        activePoseRef.current.close();
+      } catch (e) {
+        console.warn("Error closing pose model:", e);
+      }
+      activePoseRef.current = null;
+    }
+    setIsCameraActive(false);
+    setCameraLoading(false);
+
+    const fallbackVideo = document.getElementById('ai-pose-video-fallback');
+    if (fallbackVideo) {
+      try {
+        fallbackVideo.pause();
+        if (fallbackVideo.srcObject) {
+          const tracks = fallbackVideo.srcObject.getTracks();
+          tracks.forEach(track => track.stop());
+        }
+      } catch (err) {
+        console.debug("Error stopping fallback video tracks:", err);
+      }
+      fallbackVideo.remove();
+    }
+  };
+
+  const startCameraTracker = async () => {
+    setCameraError(null);
+    if (typeof window.Pose === 'undefined' || typeof window.Camera === 'undefined') {
+      setCameraError({
+        type: 'loading',
+        message: 'Model AI MediaPipe sedang dimuat atau gagal diunduh. Pastikan koneksi internet aktif dan coba lagi dalam beberapa detik.'
+      });
+      return;
+    }
+
+    // Cek protokol HTTP insecure pada IP non-localhost
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const isInsecure = window.location.protocol === 'http:' && !isLocalhost;
+    
+    if (isInsecure) {
+      setCameraError({
+        type: 'insecure',
+        message: 'Akses Kamera Ditolak (Insecure Origin). Browser memblokir kamera pada koneksi HTTP (non-localhost) demi keamanan. Silakan gunakan HTTPS atau gunakan Mode Input Repetisi Manual di bawah.'
+      });
+      return;
+    }
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setCameraError({
+        type: 'support',
+        message: 'Browser Anda tidak mendukung API Kamera (getUserMedia). Silakan gunakan browser modern atau gunakan Mode Input Repetisi Manual.'
+      });
+      return;
+    }
+
+    setCameraLoading(true);
+    try {
+      // Coba lakukan getUserMedia terlebih dahulu untuk memicu prompt izin
+      const testStream = await navigator.mediaDevices.getUserMedia({ video: { width: 480, height: 360 } });
+      // Hentikan stream percobaan segera agar kamera tidak bentrok
+      testStream.getTracks().forEach(track => track.stop());
+
+      const pose = new window.Pose({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+      });
+
+      pose.setOptions({
+        modelComplexity: 0, // Lite Model untuk FPS tinggi & anti-lag di laptop/hp
+        smoothLandmarks: true,
+        enableSegmentation: false,
+        smoothSegmentation: false,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+
+      pose.onResults((results) => {
+        if (!canvasRef.current) return;
+        const canvasCtx = canvasRef.current.getContext('2d');
+        const width = canvasRef.current.width;
+        const height = canvasRef.current.height;
+
+        canvasCtx.clearRect(0, 0, width, height);
+
+        // Gambar video feed
+        canvasCtx.drawImage(results.image, 0, 0, width, height);
+
+        if (results.poseLandmarks) {
+          const landmarks = results.poseLandmarks;
+
+          // Keypoints Kiri
+          const leftShoulder = landmarks[11];
+          const leftElbow = landmarks[13];
+          const leftWrist = landmarks[15];
+          const leftHip = landmarks[23];
+          const leftKnee = landmarks[25];
+          const leftAnkle = landmarks[27];
+
+          // Keypoints Kanan
+          const rightShoulder = landmarks[12];
+          const rightElbow = landmarks[14];
+          const rightWrist = landmarks[16];
+          const rightHip = landmarks[24];
+          const rightKnee = landmarks[26];
+          const rightAnkle = landmarks[28];
+
+          // Deteksi jenis latihan dari nama gerakan
+          const exName = activeExercise ? activeExercise.NamaGerakan.toLowerCase() : "";
+          const isLegs = exName.includes("squat") || exName.includes("lunge") || exName.includes("calf");
+
+          // Hitung sudut sendi secara adaptif dari sisi yang paling terlihat (visibility tertinggi)
+          let angle = 180;
+          if (isLegs) {
+            const leftLegVis = (leftHip?.visibility || 0) + (leftKnee?.visibility || 0) + (leftAnkle?.visibility || 0);
+            const rightLegVis = (rightHip?.visibility || 0) + (rightKnee?.visibility || 0) + (rightAnkle?.visibility || 0);
+            if (leftLegVis >= rightLegVis) {
+              angle = calculateAngle(leftHip, leftKnee, leftAnkle);
+            } else {
+              angle = calculateAngle(rightHip, rightKnee, rightAnkle);
+            }
+          } else {
+            const leftArmVis = (leftShoulder?.visibility || 0) + (leftElbow?.visibility || 0) + (leftWrist?.visibility || 0);
+            const rightArmVis = (rightShoulder?.visibility || 0) + (rightElbow?.visibility || 0) + (rightWrist?.visibility || 0);
+            if (leftArmVis >= rightArmVis) {
+              angle = calculateAngle(leftShoulder, leftElbow, leftWrist);
+            } else {
+              angle = calculateAngle(rightShoulder, rightElbow, rightWrist);
+            }
+          }
+
+          setJointAngle(angle);
+
+          // State Machine Rep Counter
+          const limitDown = isLegs ? 115 : 100;
+          const limitUp = isLegs ? 155 : 145;
+
+          if (angle <= limitDown && poseStateRef.current === 'up') {
+            poseStateRef.current = 'down';
+            setPoseState('down');
+            playBeep(440, 0.05); // Bip pendek di posisi bawah
+          } else if (angle >= limitUp && poseStateRef.current === 'down') {
+            poseStateRef.current = 'up';
+            setPoseState('up');
+
+            // Naik reps! Update customReps secara dinamis
+            setCustomReps(prev => {
+              const currentVal = prev[repsKey] !== undefined ? prev[repsKey] : parseTargetReps(activeExercise.Reps);
+              const nextVal = currentVal + 1;
+
+              // Hitung damage multiplier senjata RPG
+              let damageMultiplier = 1;
+              if (rpgEquipped?.weapon?.id === 'weapon_iron_sword') damageMultiplier = 1.15;
+              if (rpgEquipped?.weapon?.id === 'weapon_fire_claymore') damageMultiplier = 1.35;
+
+              // Kurangi HP bos secara real-time!
+              const dmg = Number((1 * damageMultiplier).toFixed(2));
+              setBossHp(bossPrev => Math.max(Number((bossPrev - dmg).toFixed(2)), 0));
+              setDamageDealtTotal(damagePrev => Number((damagePrev + dmg).toFixed(2)));
+
+              // Update progres quest reps harian
+              onUpdateQuestProgress('quest_reps', 1);
+
+              // Bunyikan beep sukses rep & AI Workout Coach Voice Feedback
+              playBeep(880, 0.1);
+              
+              let voiceMsg = nextVal.toString();
+              if (nextVal === 3) {
+                const motivates = [
+                  "Form yang mantap! Jaga ritme.",
+                  "Bagus sekali! Rasakan kontraksi ototnya.",
+                  "Terus bergerak, Anda melakukannya dengan benar!"
+                ];
+                voiceMsg += `. ${motivates[Math.floor(Math.random() * motivates.length)]}`;
+              } else if (nextVal === 6) {
+                voiceMsg += ". Luar biasa! Setengah jalan lagi bos akan tumbang.";
+              } else if (nextVal === 10) {
+                voiceMsg += ". Sempurna! Target repetisi tercapai. Sangat kuat!";
+              }
+              speakText(voiceMsg);
+
+              // Tambahkan battle log pertempuran
+              const selectedBoss = BOSSES[selectedBossIdx];
+              setBattleLog(logPrev => [
+                `💥 Rep ke-${nextVal} ${activeExercise.NamaGerakan} mengenai ${selectedBoss.name}! (${damageMultiplier > 1 ? `Bonus Weapon: ` : ''}-${dmg} HP)`,
+                ...logPrev
+              ].slice(0, 5));
+
+              return { ...prev, [repsKey]: nextVal };
+            });
+          }
+
+          // Gambar kerangka tubuh (skeleton) di canvas untuk interaktivitas RPG
+          const drawLine = (p1, p2, color = '#22c55e', w = 3) => {
+            if (!p1 || !p2) return;
+            canvasCtx.beginPath();
+            canvasCtx.moveTo(p1.x * width, p1.y * height);
+            canvasCtx.lineTo(p2.x * width, p2.y * height);
+            canvasCtx.strokeStyle = color;
+            canvasCtx.lineWidth = w;
+            canvasCtx.stroke();
+          };
+
+          const drawPoint = (p, color = '#3b82f6', r = 4) => {
+            if (!p) return;
+            canvasCtx.beginPath();
+            canvasCtx.arc(p.x * width, p.y * height, r, 0, 2 * Math.PI);
+            canvasCtx.fillStyle = color;
+            canvasCtx.fill();
+          };
+
+          // Hitung sudut kelurusan core (Shoulder -> Hip -> Knee) secara adaptif
+          const leftCoreVis = (leftShoulder?.visibility || 0) + (leftHip?.visibility || 0) + (leftKnee?.visibility || 0);
+          const rightCoreVis = (rightShoulder?.visibility || 0) + (rightHip?.visibility || 0) + (rightKnee?.visibility || 0);
+          
+          let coreAngle = 180;
+          if (leftCoreVis >= rightCoreVis) {
+            coreAngle = calculateAngle(leftShoulder, leftHip, leftKnee);
+          } else {
+            coreAngle = calculateAngle(rightShoulder, rightHip, rightKnee);
+          }
+
+          // Analisis form real-time (AI Coach Form Warnings)
+          const nowTime = performance.now();
+          const exNameLower = exName.toLowerCase();
+          let formWarning = "";
+          let isBadForm = false;
+
+          // Deteksi kelurusan core (Push-Up / Plank / Dips)
+          if (exNameLower.includes("pushup") || exNameLower.includes("push-up") || exNameLower.includes("plank") || exNameLower.includes("dips")) {
+            if (coreAngle < 155) {
+              isBadForm = true;
+              formWarning = "Kencangkan core Anda, pinggul kurang lurus!";
+            }
+          }
+          
+          // Deteksi Squat (Jangan membungkuk berlebihan)
+          if (exNameLower.includes("squat") || exNameLower.includes("lunge")) {
+            if (coreAngle < 85 && angle < 120) {
+              isBadForm = true;
+              formWarning = "Tegakkan dada Anda, jangan terlalu membungkuk!";
+            }
+          }
+
+          if (isBadForm && formWarning) {
+            if (nowTime - lastFormWarningTimeRef.current > 5000) {
+              lastFormWarningTimeRef.current = nowTime;
+              speakText(formWarning);
+              setFormWarningText(formWarning);
+              
+              setBattleLog(logPrev => [
+                `⚠️ AI Form Warning: ${formWarning}`,
+                ...logPrev
+              ].slice(0, 5));
+            }
+          } else {
+            if (formWarningText) {
+              setFormWarningText("");
+            }
+          }
+
+          const skeletonColor = isBadForm ? '#ef4444' : '#22c55e'; // Merah jika form salah, hijau jika benar
+          const jointsColor = isBadForm ? '#ef4444' : '#3b82f6';
+
+          // Lengan Kiri (Shoulder - Elbow - Wrist)
+          drawLine(leftShoulder, leftElbow, isBadForm ? '#ef4444' : '#06b6d4', 3);
+          drawLine(leftElbow, leftWrist, isBadForm ? '#ef4444' : '#06b6d4', 3);
+
+          // Lengan Kanan (Shoulder - Elbow - Wrist)
+          drawLine(rightShoulder, rightElbow, isBadForm ? '#ef4444' : '#06b6d4', 3);
+          drawLine(rightElbow, rightWrist, isBadForm ? '#ef4444' : '#06b6d4', 3);
+
+          // Kaki Kiri (Hip - Knee - Ankle)
+          drawLine(leftHip, leftKnee, skeletonColor, 3);
+          drawLine(leftKnee, leftAnkle, skeletonColor, 3);
+
+          // Kaki Kanan (Hip - Knee - Ankle)
+          drawLine(rightHip, rightKnee, skeletonColor, 3);
+          drawLine(rightKnee, rightAnkle, skeletonColor, 3);
+
+          // Tubuh Kiri & Kanan (Shoulder - Hip)
+          drawLine(leftShoulder, leftHip, skeletonColor, 3);
+          drawLine(rightShoulder, rightHip, skeletonColor, 3);
+
+          // Garis Bahu & Pinggul Penghubung Horizontal
+          drawLine(leftShoulder, rightShoulder, isBadForm ? '#ef4444' : '#e11d48', 2.5);
+          drawLine(leftHip, rightHip, isBadForm ? '#ef4444' : '#e11d48', 2.5);
+
+          // Draw keypoints kiri
+          drawPoint(leftShoulder, isBadForm ? '#ef4444' : '#a855f7', 4.5);
+          drawPoint(leftElbow, isBadForm ? '#ef4444' : '#06b6d4', 5);
+          drawPoint(leftWrist, jointsColor, 5);
+          drawPoint(leftHip, skeletonColor, 4.5);
+          drawPoint(leftKnee, skeletonColor, 5);
+          drawPoint(leftAnkle, isBadForm ? '#ef4444' : '#10b981', 5);
+
+          // Draw keypoints kanan
+          drawPoint(rightShoulder, isBadForm ? '#ef4444' : '#a855f7', 4.5);
+          drawPoint(rightElbow, isBadForm ? '#ef4444' : '#06b6d4', 5);
+          drawPoint(rightWrist, jointsColor, 5);
+          drawPoint(rightHip, skeletonColor, 4.5);
+          drawPoint(rightKnee, skeletonColor, 5);
+          drawPoint(rightAnkle, isBadForm ? '#ef4444' : '#10b981', 5);
+        }
+      });
+
+      activePoseRef.current = pose;
+
+      // Cari/tentukan video element secara dinamis untuk mencegah TypeError srcObject null
+      let videoElement = videoRef.current;
+      if (!videoElement) {
+        videoElement = document.getElementById('ai-pose-video');
+      }
+      if (!videoElement) {
+        videoElement = document.querySelector('video');
+      }
+      if (!videoElement) {
+        console.warn("Video element not found. Creating dynamic fallback video element...");
+        videoElement = document.createElement('video');
+        videoElement.id = 'ai-pose-video-fallback';
+        videoElement.setAttribute('playsinline', 'true');
+        videoElement.muted = true;
+        videoElement.style.position = 'absolute';
+        videoElement.style.width = '1px';
+        videoElement.style.height = '1px';
+        videoElement.style.opacity = '0';
+        videoElement.style.pointerEvents = 'none';
+        document.body.appendChild(videoElement);
+      }
+
+      // Throttling 15 FPS untuk menghemat CPU/GPU & anti patah-patah
+      let lastFrameTime = 0;
+      const fpsLimit = 15;
+      const frameInterval = 1000 / fpsLimit;
+
+      // Start webcam stream
+      const camera = new window.Camera(videoElement, {
+        onFrame: async () => {
+          const now = performance.now();
+          if (now - lastFrameTime < frameInterval) return;
+          lastFrameTime = now;
+
+          if (videoElement && activePoseRef.current) {
+            try {
+              await activePoseRef.current.send({ image: videoElement });
+            } catch (err) {
+              console.debug("Error sending frame to pose model:", err);
+            }
+          }
+        },
+        width: 480,
+        height: 360
+      });
+
+      activeCameraRef.current = camera;
+      await camera.start();
+      setIsCameraActive(true);
+      setCameraLoading(false);
+      speakText("Kamera pelacak AI aktif. Silakan posisikan tubuh Anda.");
+    } catch (err) {
+      console.error("Gagal mengaktifkan kamera pelacak:", err);
+      let errMsg = "Gagal mengakses kamera. Pastikan Anda memberikan izin akses kamera ke browser.";
+      let errType = 'generic';
+      
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        errType = 'permission';
+        errMsg = "Izin kamera ditolak. Harap izinkan akses kamera di pengaturan browser/aplikasi Anda untuk menggunakan pelacakan AI.";
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        errType = 'notfound';
+        errMsg = "Perangkat kamera tidak ditemukan. Pastikan kamera Anda terpasang dan aktif.";
+      } else if (err.name === 'SecurityError') {
+        errType = 'insecure';
+        errMsg = "Keamanan browser memblokir kamera. Gunakan HTTPS atau localhost.";
+      }
+      
+      setCameraError({
+        type: errType,
+        message: errMsg
+      });
+      stopCameraTracker();
+    }
+  };
+
+  const timerRef = useRef(null);
+  
+  const activeExercise = workoutList[currentExerciseIdx];
+  const totalExercises = workoutList.length;
+
+  // Derive reps aktual untuk set saat ini secara dinamis (bebas dari useEffect cascading render)
+  const repsKey = `${currentExerciseIdx}-${currentSet}`;
+  const currentRepsValue = activeExercise ? (customReps[repsKey] !== undefined ? customReps[repsKey] : parseTargetReps(activeExercise.Reps)) : 10;
+
+  const warmupItems = [
+    {
+      name: "Rotasi Sendi Bahu & Lengan",
+      duration: "10-15 putaran",
+      desc: "Putar bahu ke depan dan belakang secara perlahan untuk melumasi sendi peluru bahu."
+    },
+    {
+      name: "Peregangan Pergelangan Tangan (Wrist Stretch)",
+      duration: "30-45 detik",
+      desc: "Lakukan peregangan pergelangan tangan di lantai dalam berbagai arah genggaman. Sangat penting bagi pemula calisthenics untuk menghindari cedera."
+    },
+    {
+      name: "Scapula Shrugs (Active Hang)",
+      duration: "10 repetisi",
+      desc: "Tarik bahu ke atas dan ke bawah saat menggantung di bar untuk mengaktifkan belikat dan otot trapezius."
+    },
+    {
+      name: "Bodyweight Squat Ringan",
+      duration: "8-10 repetisi",
+      desc: "Squat perlahan tanpa beban tambahan untuk memanaskan sendi lutut dan pinggul."
+    },
+    {
+      name: "Jumping Jacks / Lari di Tempat",
+      duration: "1 menit",
+      desc: "Meningkatkan detak jantung secara bertahap dan menaikkan suhu tubuh inti sebelum menarik/mendorong beban tubuh."
+    }
+  ];
+
+  const cooldownItems = [
+    {
+      name: "Peregangan Bahu (Shoulder Stretch)",
+      duration: "30 detik/sisi",
+      desc: "Tarik lengan menyilang dada dan tahan dengan tangan yang lain untuk meregangkan deltoid."
+    },
+    {
+      name: "Peregangan Dada (Chest Stretch)",
+      duration: "30 detik/sisi",
+      desc: "Letakkan satu tangan pada dinding atau tiang bar, lalu putar tubuh berlawanan arah untuk meregangkan dada."
+    },
+    {
+      name: "Child's Pose (Dekompresi Tulang Belakang)",
+      duration: "1 menit",
+      desc: "Duduk bertumpu pada tumit kaki, luruskan lengan ke depan lantai, dan letakkan dahi di lantai untuk menenangkan saraf dan mendekopresi tulang belakang."
+    },
+    {
+      name: "Peregangan Pergelangan Tangan Pasif",
+      duration: "30 detik",
+      desc: "Tarik telapak tangan ke arah dalam untuk menenangkan tendon pergelangan tangan yang tegang pasca-gantungan."
+    },
+    {
+      name: "Pernapasan Dalam (Deep Breathing)",
+      duration: "1-2 menit",
+      desc: "Tarik napas dalam dari hidung, keluarkan perlahan dari mulut untuk mengembalikan detak jantung ke kondisi istirahat (parasimpatis)."
+    }
+  ];
+
+  // Bunyikan beep menggunakan Web Audio API
+  function playBeep(frequency, duration) {
+    if (!isSoundEnabled) return;
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+
+      oscillator.type = 'sine';
+      oscillator.frequency.value = frequency;
+      gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+
+      oscillator.start();
+      oscillator.stop(audioCtx.currentTime + duration);
+    } catch (e) {
+      console.warn("AudioContext failed to start: ", e);
+    }
+  }
+
+  function goToNextStep() {
+    if (currentSet < activeExercise.Set) {
+      // Lanjut ke set berikutnya di gerakan yang sama
+      setCurrentSet(prev => prev + 1);
+    } else {
+      // Jika set sudah habis, pindah ke gerakan berikutnya
+      if (currentExerciseIdx < totalExercises - 1) {
+        setCurrentExerciseIdx(prev => prev + 1);
+        setCurrentSet(1);
+        setShowDetails(false);
+      } else {
+        // Semua gerakan selesai, lanjut ke pendinginan
+        setSessionPhase('cooldown');
+        playBeep(523.25, 0.8); // Beep C5 untuk sukses besar
+      }
+    }
+  }
+
+  // Timer Countdown Effect
+  useEffect(() => {
+    if (isResting && restTimeLeft > 0) {
+      timerRef.current = setInterval(() => {
+        setRestTimeLeft(prev => {
+          if (prev <= 1) {
+            clearInterval(timerRef.current);
+            setIsResting(false);
+            // Bunyi beep panjang menandakan istirahat selesai
+            playBeep(880, 0.5);
+            speakText("Mulai!");
+            goToNextStep();
+            return 0;
+          }
+          // Bunyi beep pendek di 3 detik terakhir
+          if (prev === 4) {
+            speakText("Tiga");
+          } else if (prev === 3) {
+            speakText("Dua");
+          } else if (prev === 2) {
+            speakText("Satu");
+          }
+          if (prev <= 4) {
+            playBeep(440, 0.1);
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+
+    return () => clearInterval(timerRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isResting, restTimeLeft]);
+
+  // Effect untuk Metronom Tempo Training
+  useEffect(() => {
+    let metronomeInterval = null;
+    if (sessionPhase === 'workout' && !isResting && isMetronomeEnabled) {
+      metronomeInterval = setInterval(() => {
+        setMetronomeSeconds(prev => {
+          const totalDuration = tempoEccentric + tempoIsometricBottom + tempoConcentric + tempoIsometricTop;
+          const nextSec = (prev + 1) % totalDuration;
+          
+          // Awal rep (sec = 0) berbunyi bip lebih tinggi (800Hz), ketukan tempo biasa bernada rendah (500Hz)
+          const pitch = nextSec === 0 ? 800 : 500;
+          playBeep(pitch, 0.05);
+
+          return nextSec;
+        });
+      }, 1000);
+    }
+
+    return () => {
+      if (metronomeInterval) clearInterval(metronomeInterval);
+      setMetronomeSeconds(0);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionPhase, isResting, isMetronomeEnabled, tempoEccentric, tempoIsometricBottom, tempoConcentric, tempoIsometricTop]);
+
+  const handleFinishSet = () => {
+    playBeep(660, 0.15);
+    
+    // Hitung damage multiplier berdasarkan senjata yang dipakai
+    let damageMultiplier = 1;
+    if (rpgEquipped?.weapon?.id === 'weapon_iron_sword') damageMultiplier = 1.15;
+    if (rpgEquipped?.weapon?.id === 'weapon_fire_claymore') damageMultiplier = 1.35;
+    
+    // Kurangi HP bos berdasarkan currentRepsValue * multiplier
+    const damage = Number((Number(currentRepsValue || 0) * damageMultiplier).toFixed(2));
+    const nextBossHp = Math.max(Number((bossHp - damage).toFixed(2)), 0);
+    setBossHp(nextBossHp);
+    setDamageDealtTotal(prev => Number((prev + damage).toFixed(2)));
+    
+    // Update progres quest reps harian & metronom
+    onUpdateQuestProgress('quest_reps', Number(currentRepsValue || 0));
+    if (isMetronomeEnabled) {
+      onUpdateQuestProgress('quest_metronome', 1);
+    }
+    
+    const selectedBoss = BOSSES[selectedBossIdx];
+    const logMessage = `💥 Boom! Anda menyerang ${selectedBoss.name} dengan ${activeExercise.NamaGerakan} sebanyak ${currentRepsValue} reps! (${damageMultiplier > 1 ? `Bonus Weapon: ` : ''}-${damage} HP)`;
+    
+    // Serangan balik bos jika masih hidup dan hero masih hidup
+    let counterLog = null;
+    if (nextBossHp > 0 && playerHp > 0) {
+      const baseAttack = selectedBoss.attack || 10;
+      let shieldReduction = 0;
+      if (rpgEquipped?.shield?.id === 'shield_wooden') shieldReduction = 0.10;
+      if (rpgEquipped?.shield?.id === 'shield_steel') shieldReduction = 0.25;
+      
+      const finalBossDmg = Number((baseAttack * (1 - shieldReduction)).toFixed(2));
+      setPlayerHp(prev => Math.max(Number((prev - finalBossDmg).toFixed(2)), 0));
+      counterLog = `⚠️ ${selectedBoss.icon} ${selectedBoss.name} menyerang balik! Anda menerima ${finalBossDmg} damage. ${shieldReduction > 0 ? `(Diredam Perisai -${Math.round(shieldReduction * 100)}%)` : ''}`;
+    }
+
+    setBattleLog(prev => {
+      const newLogs = [logMessage];
+      if (counterLog) newLogs.push(counterLog);
+      return [...newLogs, ...prev].slice(0, 5);
+    });
+    
+    // Tentukan waktu istirahat (default ke 60 jika tidak disetel)
+    const restDuration = parseInt(activeExercise.Istirahat) || 60;
+    setRestTimeLeft(restDuration);
+    setIsResting(true);
+  };
+
+  const skipRest = () => {
+    clearInterval(timerRef.current);
+    setIsResting(false);
+    goToNextStep();
+  };
+
+  const handleSaveWorkout = () => {
+    // Simpan PR baru secara otomatis jika performa yang dicapai melebihi PR lama
+    workoutList.forEach((ex, idx) => {
+      const prCategory = mapExerciseToPRCategory(ex.NamaGerakan);
+      if (prCategory) {
+        const perfVal = Number(performanceData[idx] || 0);
+        const oldPR = Number(personalRecords[prCategory] || 0);
+        if (perfVal > oldPR) {
+          onUpdatePR(prCategory, perfVal);
+        }
+      }
+    });
+
+    onFinishWorkout(day, notes);
+  };
+
+  // 1. Tampilan Layar Pemanasan (Warm-Up)
+  if (sessionPhase === 'warmup') {
+    return (
+      <div className="w-full max-w-xl mx-auto px-4 py-4 space-y-6">
+        <div className="flex items-center justify-between">
+          <button
+            onClick={onCancelWorkout}
+            className="flex items-center space-x-1.5 text-zinc-500 hover:text-zinc-350 text-xs transition cursor-pointer"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Batalkan Sesi</span>
+          </button>
+          <span className="text-[10px] bg-amber-950/30 text-amber-400 border border-amber-850/30 px-3 py-1 rounded-full font-bold uppercase tracking-wider">
+            Fase 1: Pemanasan
+          </span>
+        </div>
+
+        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-xl space-y-6">
+          <div className="space-y-1.5">
+            <h2 className="text-lg font-bold text-zinc-150">Pemanasan Wajib (Warm-Up)</h2>
+            <p className="text-xs text-zinc-455 leading-relaxed font-sans">
+              Pemanasan sangat krusial untuk melumasi sendi belikat & pergelangan tangan, meregangkan otot secara aktif, dan mencegah ketegangan tendon berlebih.
+            </p>
+          </div>
+
+          <div className="space-y-3.5">
+            {warmupItems.map((item, idx) => (
+              <div key={idx} className="bg-zinc-950/40 border border-zinc-850 rounded-xl p-3.5 space-y-1">
+                <div className="flex justify-between items-start">
+                  <h4 className="text-xs font-bold text-zinc-200 flex items-center space-x-2">
+                    <span className="w-4 h-4 rounded-full bg-amber-500/10 text-amber-400 flex items-center justify-center font-mono text-[9px] font-bold">
+                      {idx + 1}
+                    </span>
+                    <span>{item.name}</span>
+                  </h4>
+                  <span className="text-[9px] bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded text-amber-400 font-mono font-bold shrink-0">
+                    {item.duration}
+                  </span>
+                </div>
+                <p className="text-[11px] text-zinc-500 pl-6 leading-relaxed font-sans">{item.desc}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* RPG BOSS SELECT PANEL */}
+          <div className="bg-zinc-950/40 border border-zinc-850 rounded-2xl p-4.5 space-y-3 text-left">
+            <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
+              <Swords size={12} className="text-amber-400" /> TANTANG BOS WORKOUT RPG
+            </span>
+            <p className="text-[11px] text-zinc-500 font-sans leading-relaxed">
+              Pilih bos yang ingin Anda lawan hari ini. Selesaikan repetisi set latihan Anda untuk memberikan damage dan mengalahkan bos!
+            </p>
+            <div className="grid grid-cols-2 gap-2.5 pt-1">
+              {BOSSES.map((boss, idx) => (
+                <button
+                  type="button"
+                  key={idx}
+                  onClick={() => {
+                    setSelectedBossIdx(idx);
+                    setBossHp(boss.maxHp);
+                  }}
+                  className={`p-3 rounded-xl border text-left transition cursor-pointer relative overflow-hidden flex flex-col justify-between h-20 select-none ${
+                    selectedBossIdx === idx 
+                      ? 'bg-amber-950/15 border-amber-500/40 text-zinc-100' 
+                      : 'bg-zinc-900/40 border-zinc-850 text-zinc-400 hover:border-zinc-800'
+                  }`}
+                >
+                  <div className="flex justify-between items-start w-full">
+                    <span className="text-xl">{boss.icon}</span>
+                    <span className="text-[8px] bg-zinc-950/60 border border-zinc-850 px-2 py-0.5 rounded font-mono font-bold text-zinc-400">
+                      HP: {boss.maxHp}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-xs font-black block leading-none">{boss.name}</span>
+                    <span className="text-[9px] text-amber-400 font-medium font-sans mt-1 block">
+                      +{boss.xpReward} XP / +{boss.coinsReward} C
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <button
+            onClick={() => {
+              playBeep(660, 0.2);
+              // Set awal HP Bos saat latihan dimulai
+              setBossHp(BOSSES[selectedBossIdx].maxHp);
+              setSessionPhase('workout');
+            }}
+            className="w-full bg-lime-500 hover:bg-lime-400 text-zinc-950 font-extrabold py-4 px-6 rounded-xl transition flex items-center justify-center space-x-2 text-sm cursor-pointer shadow-lg active:scale-[0.98]"
+          >
+            <span>Mulai Latihan Inti (Workout)</span>
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Tampilan Layar Pendinginan (Cool-Down)
+  if (sessionPhase === 'cooldown') {
+    return (
+      <div className="w-full max-w-xl mx-auto px-4 py-4 space-y-6">
+        <div className="flex justify-end">
+          <span className="text-[10px] bg-cyan-950/30 text-cyan-400 border border-cyan-850/30 px-3 py-1 rounded-full font-bold uppercase tracking-wider">
+            Fase 3: Pendinginan
+          </span>
+        </div>
+
+        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-xl space-y-6">
+          <div className="space-y-1.5">
+            <h2 className="text-lg font-bold text-zinc-150">Pendinginan & Recovery (Cool-Down)</h2>
+            <p className="text-xs text-zinc-455 leading-relaxed font-sans">
+              Regangkan otot-otot Anda untuk merangsang proses perbaikan serat otot, meredakan stres saraf pusat, dan mengembalikan detak jantung ke kondisi istirahat.
+            </p>
+          </div>
+
+          <div className="space-y-3.5">
+            {cooldownItems.map((item, idx) => (
+              <div key={idx} className="bg-zinc-950/40 border border-zinc-850 rounded-xl p-3.5 space-y-1">
+                <div className="flex justify-between items-start">
+                  <h4 className="text-xs font-bold text-zinc-200 flex items-center space-x-2">
+                    <span className="w-4 h-4 rounded-full bg-cyan-500/10 text-cyan-400 flex items-center justify-center font-mono text-[9px] font-bold">
+                      {idx + 1}
+                    </span>
+                    <span>{item.name}</span>
+                  </h4>
+                  <span className="text-[9px] bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded text-cyan-400 font-mono font-bold shrink-0">
+                    {item.duration}
+                  </span>
+                </div>
+                <p className="text-[11px] text-zinc-500 pl-6 leading-relaxed font-sans">{item.desc}</p>
+              </div>
+            ))}
+          </div>
+
+          <button
+            onClick={() => {
+              playBeep(660, 0.2);
+              setSessionPhase('finish');
+            }}
+            className="w-full bg-lime-500 hover:bg-lime-400 text-zinc-950 font-extrabold py-4 px-6 rounded-xl transition flex items-center justify-center space-x-2 text-sm cursor-pointer shadow-lg active:scale-[0.98]"
+          >
+            <span>Simpan Hasil Latihan</span>
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // 3. Tampilan Layar Selesai (Simpan Hasil)
+  if (sessionPhase === 'finish') {
+    // Hitung sesi terselesaikan untuk hari ini
+    const sessionCount = progressHistory.filter(h => h.HariWorkout === day && h.Status === "Selesai").length + 1; // tambah 1 untuk sesi saat ini
+    const initialWeight = weightHistory && weightHistory.length > 0 ? Number(weightHistory[0].weight) : weight;
+    const weightDiff = Number((weight - initialWeight).toFixed(1));
+
+    return (
+      <div className="w-full max-w-xl mx-auto px-4 py-6 space-y-6">
+        <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 md:p-8 text-center shadow-2xl relative overflow-hidden space-y-6">
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-40 h-40 bg-lime-500/10 rounded-full blur-3xl"></div>
+          
+          <div className="w-20 h-20 bg-lime-950/40 border-2 border-lime-400 rounded-full flex items-center justify-center mx-auto shadow-lg shadow-lime-500/10 scale-110 transition duration-500">
+            <CheckCircle2 className="w-10 h-10 text-lime-400" />
+          </div>
+
+          <div className="space-y-2">
+            <h2 className="text-2xl font-bold text-zinc-100 tracking-tight">Workout Selesai!</h2>
+            <p className="text-sm text-zinc-400 max-w-[280px] mx-auto leading-relaxed font-sans">
+              Kerja bagus! Sesi pemanasan, latihan inti, dan pendinginan telah diselesaikan secara lengkap hari ini.
+            </p>
+          </div>
+
+          {/* Input Reps Aktual & Deteksi PR Otomatis */}
+          <div className="space-y-3.5 text-left border-t border-b border-zinc-800/80 py-5">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-300 flex items-center space-x-1.5">
+              <Award className="w-4 h-4 text-lime-400" />
+              <span>Verifikasi Repetisi & Rekor Pribadi</span>
+            </h3>
+            <p className="text-[11px] text-zinc-500 font-sans leading-relaxed">
+              Masukkan reps atau durasi (detik) maksimal yang berhasil Anda selesaikan di set terbaik hari ini untuk mendeteksi Rekor Pribadi (PR) baru secara otomatis.
+            </p>
+
+            <div className="space-y-2.5 pt-1">
+              {workoutList.map((ex, idx) => {
+                const prCategory = mapExerciseToPRCategory(ex.NamaGerakan);
+                const currentVal = Number(performanceData[idx] || 0);
+                const oldPR = prCategory ? Number(personalRecords?.[prCategory] || 0) : 0;
+                const isNewPR = prCategory && currentVal > oldPR;
+                
+                // Cari apakah ada level berikutnya di progressionDb
+                const progInfo = findExerciseInProgression(ex.NamaGerakan);
+                const hasNextLevel = progInfo && progInfo.next;
+                const isUpgraded = upgradedExercises[ex.NamaGerakan];
+
+                const isDuration = ex.Reps.toLowerCase().includes('detik') || ex.Reps.toLowerCase().includes('second') || ex.Reps.toLowerCase().includes('hang') || ex.Reps.toLowerCase().includes('hold');
+
+                return (
+                  <div key={idx} className="bg-zinc-950/40 border border-zinc-850 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div className="space-y-1">
+                      <span className="text-xs font-bold text-zinc-200 block">{ex.NamaGerakan}</span>
+                      <div className="flex items-center space-x-2 text-[10px] text-zinc-500 font-mono">
+                        <span>Target: {ex.Reps}</span>
+                        {prCategory && <span>• PR Lama: {oldPR} {isDuration ? 'detik' : 'reps'}</span>}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center space-x-2 shrink-0 self-end sm:self-auto">
+                      {/* Live PR Badge */}
+                      {isNewPR && (
+                        <span className="bg-lime-950/40 text-lime-400 border border-lime-800/40 text-[9px] font-extrabold px-2 py-0.5 rounded-md animate-pulse uppercase tracking-wider flex items-center space-x-1 shrink-0">
+                          <Sparkles className="w-2.5 h-2.5 fill-current" />
+                          <span>PR Baru!</span>
+                        </span>
+                      )}
+
+                      {/* Upgrade/Terlalu Mudah Button */}
+                      {hasNextLevel && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isUpgraded) return;
+                            setActiveUpgradeInfo({
+                              oldName: ex.NamaGerakan,
+                              nextName: progInfo.next.name,
+                              desc: progInfo.next.desc,
+                              categoryName: progInfo.categoryName,
+                              isDowngrade: false
+                            });
+                          }}
+                          className={`text-[10px] px-2 py-1.5 rounded-lg border font-bold flex items-center space-x-1.5 transition cursor-pointer select-none ${
+                            isUpgraded
+                              ? 'bg-lime-950/20 border-lime-800/30 text-lime-400 cursor-default'
+                              : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-lime-400 hover:border-lime-900/50'
+                          }`}
+                          title={isUpgraded ? `Telah dinaikkan kesulitan ke ${isUpgraded}` : "Gerakan terasa terlalu mudah? Klik untuk naik level kesulitan"}
+                        >
+                          <ArrowUpCircle className="w-3.5 h-3.5" />
+                          <span>{isUpgraded ? 'Up Leveled' : 'Terlalu Mudah?'}</span>
+                        </button>
+                      )}
+
+                      {/* Downgrade/Terlalu Sulit Button */}
+                      {progInfo && progInfo.index > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isUpgraded) return;
+                            setActiveUpgradeInfo({
+                              oldName: ex.NamaGerakan,
+                              nextName: progInfo.levels[progInfo.index - 1].name,
+                              desc: progInfo.levels[progInfo.index - 1].desc,
+                              categoryName: progInfo.categoryName,
+                              isDowngrade: true
+                            });
+                          }}
+                          className="text-[10px] px-2 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-rose-400 hover:border-rose-900/50 font-bold flex items-center space-x-1.5 transition cursor-pointer select-none"
+                          title="Gerakan terasa terlalu sulit? Klik untuk menurunkan level kesulitan"
+                        >
+                          <ArrowDownCircle className="w-3.5 h-3.5" />
+                          <span>Terlalu Sulit?</span>
+                        </button>
+                      )}
+
+                      {/* Input Performance */}
+                      <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1">
+                        <input
+                          type="number"
+                          min="0"
+                          value={performanceData[idx] || ''}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value) || 0;
+                            setPerformanceData(prev => ({ ...prev, [idx]: val }));
+                          }}
+                          className="w-10 bg-transparent text-center text-xs font-bold text-zinc-100 focus:outline-none"
+                        />
+                        <span className="text-[10px] text-zinc-500 font-medium ml-1">
+                          {isDuration ? 'dtk' : 'rep'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Panel AI Insights & Rekomendasi Progresi */}
+          <div className="bg-zinc-950/50 border border-zinc-850 rounded-2xl p-4 text-left space-y-3">
+            <div className="flex items-center space-x-2 text-lime-400 border-b border-zinc-900 pb-2">
+              <Sparkles className="w-4 h-4" />
+              <span className="text-[11px] font-bold uppercase tracking-wider">AI Insights & Rekomendasi</span>
+            </div>
+            
+            <div className="space-y-3.5 text-[11px] leading-relaxed font-sans text-zinc-400">
+              {/* Konsistensi */}
+              <div className="flex items-start space-x-2">
+                <div className="w-5 h-5 rounded-full bg-cyan-950/40 text-cyan-400 flex items-center justify-center font-bold text-[9px] shrink-0 mt-0.5 font-mono">
+                  {sessionCount}
+                </div>
+                <div>
+                  <p className="text-zinc-200 font-semibold leading-none">Konsistensi Hari {day}: {sessionCount} Sesi</p>
+                  <p className="text-zinc-400 mt-1">
+                    {sessionCount >= 6 
+                      ? "Anda telah menyelesaikan 6+ sesi di hari ini. Tubuh Anda dipastikan sudah teradaptasi dengan baik. Sangat disarankan menaikkan tingkat kesulitan gerakan (progresi) jika target reps saat ini terasa ringan!"
+                      : `Selesaikan ${6 - sessionCount} sesi lagi di hari ${day} untuk mencapai fase adaptasi kekuatan & tendon sebelum disarankan menaikkan level kesulitan.`}
+                  </p>
+                </div>
+              </div>
+
+              {/* BB Ektomorf */}
+              <div className="flex items-start space-x-2 border-t border-zinc-900 pt-3">
+                <Weight className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-zinc-200 font-semibold leading-none">
+                    Analisis BB Ektomorf: {weight} kg {weightDiff > 0 ? `(+${weightDiff} kg)` : weightDiff < 0 ? `(${weightDiff} kg)` : '(Stabil)'}
+                  </p>
+                  <p className="text-zinc-400 mt-1">
+                    {weightDiff > 0 
+                      ? `Selamat! Berat badan Anda meningkat +${weightDiff} kg dari awal latihan (${initialWeight} kg). Untuk tipe tubuh ektomorf, ini pertanda baik kenaikan massa otot. Ingat, beban calisthenics (bodyweight) Anda kini bertambah secara alami. Jika gerakan terasa berat, itu normal; tetapi jika Anda tetap kuat mencapai target reps, kekuatan murni Anda bertambah pesat!`
+                      : "Berat badan Anda saat ini stabil. Bagi ektomorf yang ingin meningkatkan massa otot (bulking), sangat penting memicu progressive overload (naik level gerakan / tambah reps) dipadukan dengan surplus kalori yang terpantau di tab Gizi AI."}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* RPG BOSS BATTLE RESULTS */}
+          {(() => {
+            const boss = BOSSES[selectedBossIdx];
+            const isVictory = bossHp === 0 && playerHp > 0;
+            const isDefeated = playerHp === 0;
+            
+            let xpMultiplier = 1;
+            if (rpgEquipped?.armor?.id === 'armor_matcha') xpMultiplier = 1.15;
+            if (rpgEquipped?.armor?.id === 'armor_vest') xpMultiplier = 1.30;
+
+            const xpGained = isVictory 
+              ? Math.round(boss.xpReward * xpMultiplier) 
+              : isDefeated 
+                ? Math.round(boss.xpReward * 0.2 * xpMultiplier)
+                : Math.round(boss.xpReward * 0.4 * xpMultiplier);
+
+            const coinsGained = isVictory 
+              ? boss.coinsReward 
+              : isDefeated 
+                ? Math.round(boss.coinsReward * 0.2)
+                : Math.round(boss.coinsReward * 0.4);
+
+            const badgeGained = isVictory ? boss.badge : null;
+
+            return (
+              <div className="bg-zinc-950/50 border border-zinc-850 rounded-2xl p-5 text-left space-y-4 relative overflow-hidden">
+                {isVictory ? (
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-lime-500/5 rounded-full blur-2xl"></div>
+                ) : (
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-red-500/5 rounded-full blur-2xl"></div>
+                )}
+
+                <div className="flex items-center space-x-2.5">
+                  {isVictory ? <Trophy size={48} className="text-amber-400" /> : isDefeated ? <AlertTriangle size={48} className="text-red-500" /> : <Wind size={48} className="text-zinc-400" />}
+                  <div>
+                    <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider block">Hasil Pertarungan RPG</span>
+                    <h3 className={`text-sm font-black uppercase tracking-wide leading-none mt-1 ${isVictory ? 'text-lime-400' : isDefeated ? 'text-red-500 animate-pulse' : 'text-zinc-400'}`}>
+                      {isVictory ? `${boss.name} SLAIN!` : isDefeated ? `HERO DEFEATED!` : `${boss.name} MELARIKAN DIRI`}
+                    </h3>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-zinc-400 font-sans leading-relaxed">
+                  {isVictory 
+                    ? `Luar biasa! Anda berhasil memberikan total ${damageDealtTotal} damage dan mengalahkan ${boss.name}. Klaim hadiah pertempuran Anda sekarang!`
+                    : isDefeated 
+                      ? `Aduh! HP Anda habis karena serangan balik dari ${boss.name}. Meskipun kalah dalam pertarungan, Anda tetap menyelesaikan workout! Teruslah berlatih!`
+                      : `Anda telah memberikan total ${damageDealtTotal} damage. Namun ${boss.name} berhasil melarikan diri dengan ${bossHp} HP tersisa. Ambil hadiah hiburan atas perjuangan Anda!`}
+                </p>
+
+                {/* Rewards List */}
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <div className="bg-zinc-900/80 border border-zinc-850 px-3 py-1.5 rounded-xl flex items-center space-x-1.5 font-mono text-xs font-bold text-amber-300">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    <span>+{xpGained} XP</span>
+                  </div>
+                  <div className="bg-zinc-900/80 border border-zinc-850 px-3 py-1.5 rounded-xl flex items-center space-x-1.5 font-mono text-xs font-bold text-amber-400">
+                    <Coins className="w-3.5 h-3.5 text-amber-400" />
+                    <span>+{coinsGained} Koin</span>
+                  </div>
+                  {isVictory && badgeGained && (
+                    <div className="bg-zinc-900/80 border border-zinc-850 px-3 py-1.5 rounded-xl flex items-center space-x-1.5 font-mono text-xs font-bold text-lime-400">
+                      <Shield className="w-3.5 h-3.5 text-lime-400" />
+                      <span>Lencana: {badgeGained}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Claim Button */}
+                {!rewardsClaimed ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onRewardRPG(xpGained, coinsGained, badgeGained);
+                      if (isVictory) {
+                        onUpdateQuestProgress('quest_boss', 1);
+                      }
+                      setRewardsClaimed(true);
+                      playBeep(880, 0.4);
+                    }}
+                    className={`w-full py-2.5 rounded-xl font-extrabold text-xs transition cursor-pointer text-center flex items-center justify-center space-x-2 ${
+                      isVictory 
+                        ? 'bg-gradient-to-r from-amber-500 to-lime-500 hover:from-amber-400 hover:to-lime-400 text-zinc-950' 
+                        : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200'
+                    }`}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      {isVictory ? 'Klaim Hadiah Kemenangan' : 'Ambil Hadiah Hiburan'}
+                      <Gift size={16} />
+                    </span>
+                  </button>
+                ) : (
+                  <div className="bg-lime-950/20 border border-lime-900/30 text-lime-400 font-extrabold text-xs py-2.5 rounded-xl text-center flex items-center justify-center space-x-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-lime-400" />
+                    <span className="flex items-center gap-1.5">
+                      Hadiah RPG Berhasil Diklaim!
+                    </span>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Form Catatan */}
+          <div className="space-y-2 text-left pt-2">
+            <label className="block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+              Catatan Sesi (Opsional)
+            </label>
+            <textarea
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-lime-500 focus:ring-1 focus:ring-lime-500 transition h-20 resize-none"
+              placeholder="Contoh: Sangat lancar, negative pull-up terasa lebih ringan, berhasil menambah durasi plank..."
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
+          </div>
+
+          {/* Action Button */}
+          <button
+            onClick={handleSaveWorkout}
+            disabled={loading}
+            className="w-full bg-lime-500 hover:bg-lime-400 text-zinc-950 font-bold py-3.5 px-6 rounded-xl transition flex items-center justify-center space-x-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-lg shadow-lime-500/10 active:scale-[0.99]"
+          >
+            {loading ? (
+              <RefreshCw className="w-5 h-5 animate-spin" />
+            ) : (
+              <CheckCircle2 className="w-5 h-5" />
+            )}
+            <span>Simpan Progress Latihan</span>
+          </button>
+        </div>
+
+        {/* Modal Overlay Upgrade / Downgrade Level */}
+        {activeUpgradeInfo && (
+          <div className="fixed inset-0 bg-zinc-950/80 backdrop-blur-md flex items-center justify-center z-50 p-4">
+            <div className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-sm p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-200 text-left relative overflow-hidden">
+              <div className={`absolute top-0 left-0 w-full h-1.5 ${activeUpgradeInfo.isDowngrade ? 'bg-rose-500' : 'bg-lime-500'}`}></div>
+              
+              <div className="flex items-center space-x-2 pb-2 border-b border-zinc-800">
+                {activeUpgradeInfo.isDowngrade ? (
+                  <ArrowDownCircle className="w-5 h-5 text-rose-400 animate-pulse" />
+                ) : (
+                  <ArrowUpCircle className="w-5 h-5 text-lime-400 animate-pulse" />
+                )}
+                <h3 className="font-bold text-sm text-zinc-100">
+                  {activeUpgradeInfo.isDowngrade ? 'Turunkan Level Kesulitan' : 'Upgrade Level Kesulitan'}
+                </h3>
+              </div>
+              
+              <div className="space-y-3 text-xs leading-relaxed font-sans text-zinc-350">
+                <p>
+                  {activeUpgradeInfo.isDowngrade 
+                    ? 'Apakah Anda ingin menurunkan tingkat kesulitan gerakan ini karena terasa terlalu berat?' 
+                    : 'Apakah Anda ingin menaikkan tingkat kesulitan gerakan ini?'}
+                </p>
+                <div className="bg-zinc-950/60 border border-zinc-850 rounded-xl p-4 space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-wider">{activeUpgradeInfo.categoryName}</span>
+                    <span className={`text-[9px] border px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                      activeUpgradeInfo.isDowngrade 
+                        ? 'bg-rose-950/30 text-rose-400 border-rose-800/30' 
+                        : 'bg-lime-950/30 text-lime-400 border-lime-800/30'
+                    }`}>
+                      {activeUpgradeInfo.isDowngrade ? 'Down Level' : 'Level Up'}
+                    </span>
+                  </div>
+                  <h4 className="font-extrabold text-sm text-zinc-100">{activeUpgradeInfo.nextName}</h4>
+                  <p className="text-[11px] text-zinc-400 font-sans leading-relaxed">{activeUpgradeInfo.desc}</p>
+                </div>
+                <p className="text-zinc-500 text-[10px] leading-relaxed">
+                  Menyetujui akan mengubah gerakan <span className="text-zinc-300 font-semibold">{activeUpgradeInfo.oldName}</span> di jadwal latihan hari <span className="text-zinc-300 font-semibold">{day}</span> secara permanen.
+                </p>
+              </div>
+
+              <div className="flex space-x-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const success = onReplaceJadwalExercise(activeUpgradeInfo.oldName, activeUpgradeInfo.nextName);
+                    if (success) {
+                      setUpgradedExercises(prev => ({ ...prev, [activeUpgradeInfo.oldName]: activeUpgradeInfo.nextName }));
+                    }
+                    setActiveUpgradeInfo(null);
+                  }}
+                  className={`flex-1 font-extrabold py-2.5 rounded-xl transition text-xs cursor-pointer text-center ${
+                    activeUpgradeInfo.isDowngrade
+                      ? 'bg-rose-600 hover:bg-rose-500 text-zinc-950 shadow-lg shadow-rose-500/10'
+                      : 'bg-lime-500 hover:bg-lime-400 text-zinc-950 shadow-lg shadow-lime-500/10'
+                  }`}
+                >
+                  {activeUpgradeInfo.isDowngrade ? 'Turunkan Level' : 'Upgrade Sekarang'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveUpgradeInfo(null)}
+                  className="px-4 bg-zinc-850 hover:bg-zinc-800 text-zinc-350 py-2.5 rounded-xl transition text-xs font-semibold cursor-pointer border border-zinc-800"
+                >
+                  Batal
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Persentase progres latihan hari ini
+  const progressPercent = Math.round(
+    ((currentExerciseIdx) / totalExercises) * 100
+  );
+
+  return (
+    <div className="w-full max-w-6xl mx-auto px-4 py-4 space-y-6">
+      {/* Header Sesi */}
+      <div className="flex items-center justify-between bg-zinc-900/60 border border-zinc-800/80 backdrop-blur-md rounded-2xl p-4 shadow-lg">
+        {/* Keluar Sesi */}
+        <button
+          onClick={onCancelWorkout}
+          className="flex items-center space-x-2 text-zinc-400 hover:text-zinc-200 text-xs font-bold transition cursor-pointer bg-zinc-955 border border-zinc-800/60 px-3.5 py-2 rounded-xl hover:bg-zinc-900"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span>Keluar Sesi</span>
+        </button>
+
+        {/* Info Latihan Tengah */}
+        <div className="hidden sm:flex flex-col items-center">
+          <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider">Latihan Berjalan</span>
+          <span className="text-xs font-bold text-zinc-300">{day?.Hari || "Rencana Latihan"}</span>
+        </div>
+
+        {/* Toggles */}
+        <div className="flex items-center space-x-2">
+          {/* Voice Toggle */}
+          <button
+            onClick={() => {
+              setIsVoiceEnabled(!isVoiceEnabled);
+              if (!isVoiceEnabled) {
+                try {
+                  window.speechSynthesis.cancel();
+                  const speakTest = new SpeechSynthesisUtterance("Suara aktif");
+                  speakTest.lang = "id-ID";
+                  window.speechSynthesis.speak(speakTest);
+                } catch (e) {
+                  console.warn("Speech synthesis test failed:", e);
+                }
+              }
+            }}
+            className={`p-2.5 border rounded-xl transition cursor-pointer ${
+              isVoiceEnabled 
+                ? 'bg-lime-950/20 border-lime-800/40 text-lime-400' 
+                : 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300'
+            }`}
+            title={isVoiceEnabled ? "Matikan Asisten Suara" : "Aktifkan Asisten Suara"}
+          >
+            {isVoiceEnabled ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
+          </button>
+
+          {/* Beep Sound Toggle */}
+          <button
+            onClick={() => setIsSoundEnabled(!isSoundEnabled)}
+            className={`p-2.5 border rounded-xl transition cursor-pointer ${
+              isSoundEnabled 
+                ? 'bg-cyan-950/20 border-cyan-800/40 text-cyan-400' 
+                : 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300'
+            }`}
+            title={isSoundEnabled ? "Matikan Beep" : "Aktifkan Beep"}
+          >
+            {isSoundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+          </button>
+        </div>
+      </div>
+
+      {/* Progress Bar Atas */}
+      <div className="bg-zinc-900/40 border border-zinc-850/60 rounded-2xl p-4 space-y-2">
+        <div className="flex justify-between items-center text-xs font-bold text-zinc-400">
+          <span className="flex items-center gap-1.5 text-zinc-350">
+            <Trophy className="w-4 h-4 text-amber-550" />
+            <span>Progres Gerakan</span>
+          </span>
+          <span className="font-mono text-zinc-500">{currentExerciseIdx + 1} / {totalExercises} Selesai</span>
+        </div>
+        <div className="w-full h-2 bg-zinc-950 border border-zinc-850 rounded-full overflow-hidden">
+          <div 
+            className="h-full bg-gradient-to-r from-lime-500 to-emerald-400 rounded-full transition-all duration-300"
+            style={{ width: `${progressPercent || 5}%` }}
+          ></div>
+        </div>
+      </div>
+
+      {/* Grid Utama: 1 Kolom di HP, 12 Kolom di Layar Lebar */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        
+        {/* PANEL KIRI (lg:col-span-7) - Visualizer, AI Tracker & RPG Battle */}
+        <div className="lg:col-span-7 space-y-6">
+          
+          {/* RPG ACTIVE BOSS BATTLE PANEL */}
+          <div className="bg-gradient-to-br from-zinc-900 to-zinc-950 border border-zinc-850 rounded-2xl p-5 shadow-xl space-y-3 relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-red-500/5 rounded-full blur-3xl pointer-events-none"></div>
+            
+            <div className="flex justify-between items-center">
+              <div className="flex items-center space-x-3">
+                <span className="text-3xl filter drop-shadow-md animate-bounce">{BOSSES[selectedBossIdx].icon}</span>
+                <div>
+                  <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest block">Pertarungan RPG Aktif</span>
+                  <h3 className="text-sm font-black text-zinc-200 leading-none mt-1 uppercase tracking-wider flex items-center gap-1.5">
+                    <span>{BOSSES[selectedBossIdx].name}</span>
+                    <span className="text-[9px] bg-red-950 text-red-400 border border-red-800/30 px-1.5 py-0.5 rounded font-black">BOSS</span>
+                  </h3>
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="text-[9px] text-zinc-500 font-bold block">BOSS HP</span>
+                <span className="text-sm font-black font-mono text-rose-500">
+                  {bossHp} / {BOSSES[selectedBossIdx].maxHp} HP
+                </span>
+              </div>
+            </div>
+
+            {/* HP Bar */}
+            <div className="w-full h-3 bg-zinc-950 border border-zinc-850 rounded-full overflow-hidden shadow-inner">
+              <div 
+                className="h-full bg-gradient-to-r from-rose-600 to-red-500 rounded-full transition-all duration-300 shadow-md shadow-rose-500/30"
+                style={{ width: `${(bossHp / BOSSES[selectedBossIdx].maxHp) * 100}%` }}
+              ></div>
+            </div>
+
+            {/* Player HP Bar */}
+            <div className="flex justify-between items-center mt-2 pt-1 border-t border-zinc-900/60">
+              <div className="flex items-center space-x-2">
+                <Shield size={14} className="text-blue-400" />
+                <span className="text-[9px] text-zinc-550 font-bold uppercase tracking-wider">HERO HP</span>
+              </div>
+              <span className="text-xs font-black font-mono text-blue-400">{playerHp} / 100 HP</span>
+            </div>
+            <div className="w-full h-2.5 bg-zinc-950 border border-zinc-850 rounded-full overflow-hidden shadow-inner">
+              <div 
+                className="h-full bg-gradient-to-r from-blue-600 to-sky-400 rounded-full transition-all duration-300 shadow-md shadow-blue-500/30"
+                style={{ width: `${playerHp}%` }}
+              ></div>
+            </div>
+
+            {/* Equipped Equipment Icons */}
+            {(rpgEquipped?.weapon || rpgEquipped?.shield || rpgEquipped?.armor) && (
+              <div className="flex flex-wrap gap-1.5 pt-1.5 border-t border-zinc-900/60">
+                {rpgEquipped.weapon && (
+                  <span className="text-[9px] bg-zinc-950 border border-zinc-850 px-2 py-0.5 rounded text-amber-400 font-mono font-bold flex items-center gap-1">
+                    ⚔️ {rpgEquipped.weapon.name}
+                  </span>
+                )}
+                {rpgEquipped.shield && (
+                  <span className="text-[9px] bg-zinc-950 border border-zinc-850 px-2 py-0.5 rounded text-blue-400 font-mono font-bold flex items-center gap-1">
+                    🛡️ {rpgEquipped.shield.name} (-{rpgEquipped.shield.id === 'shield_wooden' ? '10%' : rpgEquipped.shield.id === 'shield_steel' ? '25%' : '0%'} DMG)
+                  </span>
+                )}
+                {rpgEquipped.armor && (
+                  <span className="text-[9px] bg-zinc-950 border border-zinc-850 px-2 py-0.5 rounded text-emerald-400 font-mono font-bold flex items-center gap-1">
+                    👕 {rpgEquipped.armor.name} (+{rpgEquipped.armor.id === 'armor_matcha' ? '15%' : rpgEquipped.armor.id === 'armor_vest' ? '30%' : '0%'} XP)
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Battle Log */}
+            <div className="bg-zinc-950/60 border border-zinc-850 rounded-xl p-3 font-mono text-[10px] text-zinc-400 space-y-1 max-h-[100px] overflow-y-auto">
+              {battleLog.map((log, lIdx) => (
+                <p key={lIdx} className={log.includes('💥') ? 'text-lime-400 font-semibold flex items-start gap-1' : log.includes('⚠️') ? 'text-red-400 font-semibold flex items-start gap-1' : 'flex items-start gap-1 text-zinc-550'}>
+                  <span className="text-zinc-650">❯</span>
+                  <span>{log}</span>
+                </p>
+              ))}
+            </div>
+          </div>
+
+          {/* AI WEBCAM TRACKER SYSTEM */}
+          <div className="bg-zinc-900 border border-zinc-805 rounded-2xl p-5 shadow-xl space-y-4 relative overflow-hidden">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 bg-zinc-950 rounded-xl border border-zinc-800">
+                  <Camera className="w-5 h-5 text-zinc-400" />
+                </div>
+                <div>
+                  <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest block font-mono">Real-time Tracker</span>
+                  <h3 className="text-sm font-black text-zinc-200 leading-none mt-1 uppercase tracking-wider">
+                    AI Pose & Reps Counter
+                  </h3>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={isCameraActive ? stopCameraTracker : startCameraTracker}
+                disabled={cameraLoading}
+                className={`text-[10px] font-black uppercase tracking-wider px-4 py-2 rounded-xl border transition cursor-pointer select-none shadow-md ${
+                  isCameraActive 
+                    ? 'bg-red-950/20 border-red-900/40 text-red-400 hover:bg-red-950/40' 
+                    : 'bg-lime-950/20 border-lime-800/40 text-lime-400 hover:bg-lime-950/30'
+                }`}
+              >
+                {cameraLoading ? (
+                  <span className="flex items-center space-x-1.5">
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-lime-400" />
+                    <span>Mengaktifkan...</span>
+                  </span>
+                ) : isCameraActive ? (
+                  'Matikan Kamera'
+                ) : (
+                  'Aktifkan Kamera'
+                )}
+              </button>
+            </div>
+
+            {/* Error Message Modal/Box */}
+            {cameraError && (
+              <div className="bg-red-950/30 border border-red-900/40 rounded-xl p-4.5 space-y-3 animate-fadeIn">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="text-xs font-bold text-red-300 uppercase tracking-wide">
+                      {cameraError.type === 'insecure' ? 'Kamera Memerlukan HTTPS' : 'Gagal Mengakses Kamera'}
+                    </h4>
+                    <p className="text-xs text-zinc-400 leading-relaxed mt-1">
+                      {cameraError.message}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex justify-end pt-1">
+                  <button
+                    onClick={() => setCameraError(null)}
+                    className="text-[10px] font-black uppercase tracking-wider px-3.5 py-1.5 bg-zinc-800 text-zinc-200 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition cursor-pointer"
+                  >
+                    Saya Mengerti, Tutup
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Video feed element & overlay skeleton canvas */}
+            <div className={`relative w-full aspect-video bg-zinc-950 rounded-xl overflow-hidden border border-zinc-850 animate-fadeIn shadow-2xl ${isCameraActive ? 'block' : 'hidden'}`}>
+              <video
+                id="ai-pose-video"
+                ref={videoRef}
+                className="absolute inset-0 w-full h-full object-cover hidden"
+                playsInline
+                muted
+              ></video>
+              
+              <canvas
+                ref={canvasRef}
+                width="480"
+                height="270"
+                className="w-full h-full object-cover transform scale-x-[-1]" 
+              ></canvas>
+
+              {/* AI Form Warning Overlay */}
+              {formWarningText && (
+                <div className="absolute top-3 left-3 right-3 bg-red-950/90 border border-red-500/50 text-red-200 px-3 py-2.5 rounded-lg text-xs font-bold flex items-center gap-2 shadow-[0_0_15px_rgba(239,68,68,0.6)] animate-pulse z-10">
+                  <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                  <span>{formWarningText}</span>
+                </div>
+              )}
+
+              {/* Live Angle Indicator */}
+              <div className="absolute bottom-3 right-3 bg-zinc-950/85 border border-zinc-855 backdrop-blur-md px-3.5 py-2 rounded-xl flex flex-col items-center">
+                <span className="text-[8px] text-zinc-550 font-bold uppercase tracking-wider font-sans">Sudut Sendi</span>
+                <span className="text-xs font-black text-lime-400 font-mono mt-0.5">{jointAngle}°</span>
+              </div>
+              
+              {/* Pose State Indicator */}
+              <div className="absolute bottom-3 left-3 bg-zinc-950/85 border border-zinc-855 backdrop-blur-md px-3.5 py-2 rounded-xl flex flex-col items-center">
+                <span className="text-[8px] text-zinc-550 font-bold uppercase tracking-wider font-sans">Fase Form</span>
+                <span className="text-xs font-black text-cyan-400 font-mono mt-0.5 uppercase font-sans">
+                  {poseState === 'down' ? '⬇️ Flexion' : '⬆️ Extension'}
+                </span>
+              </div>
+            </div>
+
+            {!isCameraActive && !cameraError && (
+              <div className="bg-zinc-950/40 border border-zinc-850 rounded-xl p-6 text-center space-y-3">
+                <p className="text-xs text-zinc-400 leading-relaxed max-w-sm mx-auto font-sans">
+                  Gunakan kamera HP/laptop Anda agar AI mendeteksi repetisi olahraga Anda secara otomatis & menganalisis form tubuh Anda.
+                </p>
+                <div className="flex justify-center">
+                  <button
+                    onClick={startCameraTracker}
+                    className="flex items-center space-x-2 text-xs font-bold text-lime-400 hover:text-lime-300 transition cursor-pointer bg-lime-950/15 border border-lime-800/30 px-4 py-2.5 rounded-xl hover:bg-lime-950/30"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                    <span>Coba Deteksi AI</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Metronome & Tempo Training Panel */}
+          <div className="bg-zinc-900 border border-zinc-805 rounded-2xl p-5 shadow-xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 bg-zinc-950 rounded-xl border border-zinc-800 text-zinc-450">
+                  <Wind className="w-5 h-5" />
+                </div>
+                <div>
+                  <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest block font-mono">Tempo Training</span>
+                  <h3 className="text-sm font-black text-zinc-200 leading-none mt-1 uppercase tracking-wider">
+                    Metronom Asisten
+                  </h3>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setIsMetronomeEnabled(!isMetronomeEnabled)}
+                className={`text-[10px] font-black uppercase tracking-wider px-3.5 py-1.5 rounded-xl border cursor-pointer transition select-none shadow-md ${
+                  isMetronomeEnabled 
+                    ? 'bg-amber-950/30 border-amber-800/40 text-amber-400 hover:bg-amber-950/40' 
+                    : 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-400'
+                }`}
+              >
+                {isMetronomeEnabled ? 'Aktif' : 'Nonaktif'}
+              </button>
+            </div>
+
+            {isMetronomeEnabled ? (
+              <div className="space-y-4 animate-fadeIn">
+                {/* Visualizer Fase Tempo */}
+                <div className="bg-zinc-950/60 border border-zinc-850 rounded-xl p-4 text-center space-y-2 relative overflow-hidden">
+                  <div className="absolute inset-0 bg-amber-500/[0.02] pointer-events-none"></div>
+                  <span className="text-[10px] text-zinc-550 uppercase font-black tracking-widest block">Fase Gerakan Saat Ini</span>
+                  <span className="text-base font-extrabold text-amber-400 mt-1 block font-sans">
+                    {(() => {
+                      const sec = metronomeSeconds;
+                      if (sec < tempoEccentric) {
+                        return `⬇️ Turun (Eksentrik) - ${tempoEccentric - sec}s`;
+                      } else if (sec < tempoEccentric + tempoIsometricBottom) {
+                        return `🛑 Tahan Bawah (Iso Bottom) - ${tempoEccentric + tempoIsometricBottom - sec}s`;
+                      } else if (sec < tempoEccentric + tempoIsometricBottom + tempoConcentric) {
+                        return `⬆️ Naik (Konsentrik) - ${tempoEccentric + tempoIsometricBottom + tempoConcentric - sec}s`;
+                      } else {
+                        return `🛑 Tahan Atas (Iso Top) - ${tempoEccentric + tempoIsometricBottom + tempoConcentric + tempoIsometricTop - sec}s`;
+                      }
+                    })()}
+                  </span>
+                  
+                  {/* Tanda ketukan (bip visual) */}
+                  <div className="flex justify-center space-x-2 pt-2">
+                    {Array.from({ length: tempoEccentric + tempoIsometricBottom + tempoConcentric + tempoIsometricTop }).map((_, idx) => (
+                      <span 
+                        key={idx}
+                        className={`w-2 h-2 rounded-full transition-all duration-200 ${
+                          metronomeSeconds === idx 
+                            ? 'bg-amber-400 scale-150 shadow-md shadow-amber-400/80' 
+                            : 'bg-zinc-800'
+                        }`}
+                      ></span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Pengaturan Tempo (Slider Mini) */}
+                <div className="grid grid-cols-4 gap-2.5 text-[10px] border-t border-zinc-850/60 pt-4">
+                  <div>
+                    <span className="text-zinc-500 block text-[9px] uppercase font-bold mb-1.5 font-mono text-center">Eksentrik</span>
+                    <select
+                      value={tempoEccentric}
+                      onChange={(e) => {
+                        setTempoEccentric(Number(e.target.value));
+                        setMetronomeSeconds(0);
+                      }}
+                      className="w-full bg-zinc-950 border border-zinc-850 rounded-xl px-2 py-1.5 text-zinc-300 font-mono font-bold text-center focus:outline-none focus:border-amber-500 cursor-pointer"
+                    >
+                      {[1, 2, 3, 4, 5].map(v => <option key={v} value={v}>{v}s</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <span className="text-zinc-500 block text-[9px] uppercase font-bold mb-1.5 font-mono text-center">Iso Bawah</span>
+                    <select
+                      value={tempoIsometricBottom}
+                      onChange={(e) => {
+                        setTempoIsometricBottom(Number(e.target.value));
+                        setMetronomeSeconds(0);
+                      }}
+                      className="w-full bg-zinc-950 border border-zinc-850 rounded-xl px-2 py-1.5 text-zinc-300 font-mono font-bold text-center focus:outline-none focus:border-amber-500 cursor-pointer"
+                    >
+                      {[0, 1, 2, 3].map(v => <option key={v} value={v}>{v}s</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <span className="text-zinc-500 block text-[9px] uppercase font-bold mb-1.5 font-mono text-center">Konsentrik</span>
+                    <select
+                      value={tempoConcentric}
+                      onChange={(e) => {
+                        setTempoConcentric(Number(e.target.value));
+                        setMetronomeSeconds(0);
+                      }}
+                      className="w-full bg-zinc-950 border border-zinc-850 rounded-xl px-2 py-1.5 text-zinc-300 font-mono font-bold text-center focus:outline-none focus:border-amber-500 cursor-pointer"
+                    >
+                      {[1, 2, 3].map(v => <option key={v} value={v}>{v}s</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <span className="text-zinc-500 block text-[9px] uppercase font-bold mb-1.5 font-mono text-center">Iso Atas</span>
+                    <select
+                      value={tempoIsometricTop}
+                      onChange={(e) => {
+                        setTempoIsometricTop(Number(e.target.value));
+                        setMetronomeSeconds(0);
+                      }}
+                      className="w-full bg-zinc-950 border border-zinc-850 rounded-xl px-2 py-1.5 text-zinc-300 font-mono font-bold text-center focus:outline-none focus:border-amber-500 cursor-pointer"
+                    >
+                      {[0, 1, 2, 3].map(v => <option key={v} value={v}>{v}s</option>)}
+                    </select>
+                  </div>
+                </div>
+                <p className="text-[10px] text-zinc-550 leading-relaxed font-sans text-center">
+                  Ritme lambat melatih beban otot lebih lama (TUT - Time Under Tension). <br/>
+                  Tempo standar: <span className="font-mono text-zinc-400 font-bold">3s Turun - 1s Tahan - 1s Naik</span>.
+                </p>
+              </div>
+            ) : (
+              <div className="bg-zinc-955 border border-zinc-850/60 rounded-xl p-4 text-center">
+                <p className="text-xs text-zinc-500">Metronom dinonaktifkan. Aktifkan untuk melatih tempo gerakan terkontrol.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* PANEL KANAN (lg:col-span-5) - Kontrol Repetisi, Deskripsi Gerakan & Queue */}
+        <div className="lg:col-span-5 space-y-6">
+          
+          {/* Active Workout Focus Card */}
+          {!isResting ? (
+            <div className="bg-gradient-to-b from-zinc-900 to-zinc-950 border border-zinc-800 rounded-2xl p-6 shadow-xl space-y-6 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-24 h-24 bg-lime-500/5 rounded-full blur-2xl pointer-events-none"></div>
+              
+              {/* Badge & Info */}
+              <div className="flex justify-between items-center">
+                <span className="bg-lime-955 text-lime-400 border border-lime-800/40 text-[10px] px-3 py-1 rounded-full font-bold uppercase tracking-wider font-mono">
+                  {activeExercise.Kategori || 'Calisthenics'}
+                </span>
+                <span className="text-xs font-bold text-zinc-450 bg-zinc-950/60 border border-zinc-850 px-2.5 py-1 rounded-lg">
+                  Set <span className="text-lime-400 font-bold">{currentSet}</span> dari {activeExercise.Set}
+                </span>
+              </div>
+
+              {/* Exercise Info */}
+              <div className="space-y-1.5">
+                <h2 className="text-2xl font-black text-zinc-10 tracking-wide leading-tight">{activeExercise.NamaGerakan}</h2>
+                <div className="flex items-center space-x-2 text-cyan-400 font-mono text-sm font-bold">
+                  <Dumbbell className="w-4 h-4" />
+                  <span>Target: {activeExercise.Reps} Reps</span>
+                </div>
+              </div>
+
+              {/* Form Guide/Description */}
+              <div className="bg-zinc-950/60 border border-zinc-850 rounded-xl p-4 space-y-2 shadow-inner">
+                <span className="text-[10px] text-zinc-550 font-bold uppercase tracking-wider block">Panduan Latihan:</span>
+                <p className="text-xs text-zinc-350 leading-relaxed font-sans">
+                  {activeExercise.Deskripsi}
+                </p>
+
+                {/* Accordion Detail Langkah */}
+                {activeExercise.Langkah && activeExercise.Langkah.length > 0 && (
+                  <div className="border-t border-zinc-800/60 pt-3 mt-3">
+                    <button
+                      onClick={() => setShowDetails(!showDetails)}
+                      className="flex items-center justify-between w-full text-left text-xs font-bold text-cyan-400 hover:text-cyan-300 transition focus:outline-none cursor-pointer"
+                    >
+                      <span>Lihat Langkah Detail</span>
+                      <span className="text-[9px] bg-cyan-950/30 border border-cyan-800/30 px-2 py-0.5 rounded text-cyan-400 font-mono font-black">{showDetails ? 'TUTUP' : 'LIHAT'}</span>
+                    </button>
+                    
+                    {showDetails && (
+                      <ol className="list-decimal pl-4 pt-3 space-y-2 text-xs text-zinc-400 leading-relaxed font-sans">
+                        {activeExercise.Langkah.map((step, sIdx) => (
+                          <li key={sIdx} className="pl-1">{step}</li>
+                        ))}
+                      </ol>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* ERGONOMIC REPS CONTROLLER PANEL */}
+              <div className="bg-zinc-950 border border-zinc-850/80 rounded-xl p-5 text-center space-y-4 relative shadow-md">
+                <div className="absolute top-2 left-1/2 transform -translate-x-1/2">
+                  <span className="text-[9px] text-zinc-550 font-bold uppercase tracking-widest block font-mono">Repetisi Aktual</span>
+                </div>
+                
+                <div className="flex items-center justify-center space-x-6 pt-3">
+                  {/* Button Minus */}
+                  <button
+                    onClick={() => {
+                      const nextReps = Math.max(0, currentRepsValue - 1);
+                      setCustomReps(prev => ({ ...prev, [repsKey]: nextReps }));
+                      playBeep(440, 0.05);
+                    }}
+                    className="w-14 h-14 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-350 hover:text-zinc-100 hover:bg-zinc-850 active:scale-95 transition flex items-center justify-center font-black text-2xl select-none cursor-pointer shadow-md shadow-black/40"
+                  >
+                    -
+                  </button>
+
+                  {/* Large Reps Counter */}
+                  <div className="flex flex-col items-center min-w-[80px]">
+                    <span className="text-6xl font-black font-mono text-lime-400 tracking-tighter drop-shadow-[0_0_15px_rgba(132,204,22,0.15)]">
+                      {currentRepsValue}
+                    </span>
+                    <span className="text-[8px] text-zinc-550 font-mono uppercase tracking-widest font-black mt-1">Reps</span>
+                  </div>
+
+                  {/* Button Plus */}
+                  <button
+                    onClick={() => {
+                      const nextReps = currentRepsValue + 1;
+                      setCustomReps(prev => {
+                        // trigger boss hp dan update rpg
+                        let damageMultiplier = 1;
+                        if (rpgEquipped?.weapon?.id === 'weapon_iron_sword') damageMultiplier = 1.15;
+                        if (rpgEquipped?.weapon?.id === 'weapon_fire_claymore') damageMultiplier = 1.35;
+                        const dmg = Number((1 * damageMultiplier).toFixed(2));
+                        setBossHp(bossPrev => Math.max(Number((bossPrev - dmg).toFixed(2)), 0));
+                        setDamageDealtTotal(damagePrev => Number((damagePrev + dmg).toFixed(2)));
+                        onUpdateQuestProgress('quest_reps', 1);
+
+                        // battle log
+                        const selectedBoss = BOSSES[selectedBossIdx];
+                        setBattleLog(logPrev => [
+                          `💥 Rep ke-${nextReps} ${activeExercise.NamaGerakan} mengenai ${selectedBoss.name}! (${damageMultiplier > 1 ? `Bonus Weapon: ` : ''}-${dmg} HP)`,
+                          ...logPrev
+                        ].slice(0, 5));
+
+                        return { ...prev, [repsKey]: nextReps };
+                      });
+                      playBeep(880, 0.05);
+                    }}
+                    className="w-14 h-14 rounded-full bg-lime-500 text-zinc-950 hover:bg-lime-400 active:scale-95 transition flex items-center justify-center font-black text-2xl select-none cursor-pointer shadow-lg shadow-lime-500/20"
+                  >
+                    +
+                  </button>
+                </div>
+
+                {/* Keyboard Input Fallback (mini) */}
+                <div className="flex justify-center items-center gap-1.5 pt-1.5 border-t border-zinc-900/60">
+                  <span className="text-[9px] text-zinc-500">Edit manual:</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={currentRepsValue}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value) || 0;
+                      setCustomReps(prev => ({ ...prev, [repsKey]: val }));
+                    }}
+                    className="w-14 bg-zinc-900 border border-zinc-800 rounded px-1 py-0.5 text-center text-xs font-mono font-bold text-zinc-350 focus:outline-none focus:border-lime-500"
+                  />
+                </div>
+              </div>
+
+              {/* ACTION BUTTON UTAMA */}
+              <button
+                onClick={handleFinishSet}
+                className="w-full bg-lime-500 hover:bg-lime-400 text-zinc-950 font-black py-4.5 px-6 rounded-2xl transition flex items-center justify-center space-x-2 text-sm tracking-wider uppercase cursor-pointer shadow-lg shadow-lime-500/10 hover:shadow-lime-500/20 active:scale-[0.98]"
+              >
+                <Play className="w-4 h-4 fill-current" />
+                <span>Selesaikan Set {currentSet}</span>
+              </button>
+            </div>
+          ) : (
+            /* REST TIMER MODAL IN-PLACE */
+            <div className="bg-zinc-900 border border-zinc-805 rounded-2xl p-6 shadow-xl text-center space-y-6 relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-1 bg-cyan-500 transition-all duration-1000" style={{ width: `${(restTimeLeft / (parseInt(activeExercise.Istirahat) || 60)) * 100}%` }}></div>
+              
+              <div className="space-y-1">
+                <span className="text-[11px] font-bold uppercase tracking-widest text-cyan-400">
+                  Waktu Istirahat
+                </span>
+                <p className="text-xs text-zinc-455 font-sans">Rilekskan otot Anda sebelum set berikutnya</p>
+              </div>
+
+              {/* Timer Display */}
+              <div className="relative w-36 h-36 mx-auto flex items-center justify-center">
+                <svg className="w-full h-full -rotate-90">
+                  <circle
+                    cx="72"
+                    cy="72"
+                    r="64"
+                    className="stroke-zinc-800 fill-none"
+                    strokeWidth="6"
+                  />
+                  <circle
+                    cx="72"
+                    cy="72"
+                    r="64"
+                    className="stroke-cyan-400 fill-none transition-all duration-1000"
+                    strokeWidth="6"
+                    strokeDasharray={402}
+                    strokeDashoffset={402 - (402 * restTimeLeft) / (parseInt(activeExercise.Istirahat) || 60)}
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <div className="absolute text-3xl font-bold font-mono text-zinc-100">
+                  {restTimeLeft}s
+                </div>
+              </div>
+
+              {/* Next Exercise Info */}
+              <div className="bg-zinc-950/40 border border-zinc-850 rounded-xl p-3.5 text-left">
+                <span className="text-[9px] text-zinc-550 font-bold uppercase tracking-wider block">Gerakan Selanjutnya:</span>
+                <div className="flex justify-between items-center mt-1">
+                  <span className="text-xs font-semibold text-zinc-300">
+                    {currentSet < activeExercise.Set 
+                      ? `${activeExercise.NamaGerakan} (Set ${currentSet + 1})`
+                      : currentExerciseIdx < totalExercises - 1
+                        ? workoutList[currentExerciseIdx + 1].NamaGerakan
+                        : 'Workout Selesai!'}
+                  </span>
+                  <span className="text-[10px] font-mono text-cyan-400 font-bold">
+                    {currentSet < activeExercise.Set 
+                      ? activeExercise.Reps 
+                      : currentExerciseIdx < totalExercises - 1
+                        ? workoutList[currentExerciseIdx + 1].Reps
+                        : ''}
+                  </span>
+                </div>
+              </div>
+
+              {/* Skip Button */}
+              <button
+                onClick={skipRest}
+                className="w-full bg-zinc-850 hover:bg-zinc-800 text-zinc-200 py-3.5 rounded-xl transition text-xs font-semibold flex items-center justify-center space-x-1.5 cursor-pointer border border-zinc-800"
+              >
+                <FastForward className="w-3.5 h-3.5" />
+                <span>Lewati Istirahat</span>
+              </button>
+            </div>
+          )}
+
+          {/* Exercise Queue Preview */}
+          <div className="bg-zinc-900 border border-zinc-805 rounded-2xl p-5 shadow-xl space-y-4">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400 font-mono">
+              Daftar Gerakan Hari Ini
+            </h3>
+            <div className="space-y-2.5">
+              {workoutList.map((ex, idx) => {
+                const isCompleted = idx < currentExerciseIdx;
+                const isActive = idx === currentExerciseIdx;
+                return (
+                  <div 
+                    key={idx}
+                    className={`flex items-center justify-between p-3.5 rounded-xl border text-xs transition ${
+                      isActive 
+                        ? 'bg-lime-950/20 border-lime-500/40 text-lime-300 font-semibold' 
+                        : isCompleted
+                          ? 'bg-zinc-955 border-zinc-850/60 text-zinc-500 line-through'
+                          : 'bg-zinc-955 border-zinc-850/30 text-zinc-400'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-3">
+                      <span className={`w-5.5 h-5.5 rounded-full flex items-center justify-center font-mono text-[10px] ${
+                        isActive
+                          ? 'bg-lime-500 text-zinc-950 font-bold'
+                          : isCompleted
+                            ? 'bg-zinc-800 text-zinc-650'
+                            : 'bg-zinc-900 text-zinc-550 border border-zinc-800'
+                      }`}>
+                        {idx + 1}
+                      </span>
+                      <span>{ex.NamaGerakan}</span>
+                    </div>
+                    <div className="flex items-center space-x-2.5">
+                      <span className="text-[10px] font-mono opacity-80">{ex.Set} Set x {ex.Reps}</span>
+                      {isCompleted && <CheckCircle2 className="w-4 h-4 text-zinc-600 shrink-0" />}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
