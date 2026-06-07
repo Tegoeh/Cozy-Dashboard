@@ -244,6 +244,13 @@ function StudyTrendChart({ studyHistory }) {
   );
 }
 
+const RADIO_STATIONS = [
+  { name: "Lofi Café Beats", url: "https://stream.zeno.fm/fkpx419yp78uv" },
+  { name: "Cozy Lofi Sleep", url: "https://stream.zeno.fm/054a864yp78uv" },
+  { name: "Chillhop & Jazzhop", url: "https://stream.zeno.fm/f1412a83p78uv" },
+  { name: "Relaxing Rain Lofi", url: "https://stream.zeno.fm/547285ayp78uv" }
+];
+
 export default function BelajarTab() {
   const {
     subjects,
@@ -285,6 +292,7 @@ export default function BelajarTab() {
   const [volumeRain, setVolumeRain] = useState(0.4);
   const [volumeChimes, setVolumeChimes] = useState(0.3);
   const [volumeChatter, setVolumeChatter] = useState(0.2);
+  const [selectedRadioIdx, setSelectedRadioIdx] = useState(0);
 
   const lofiAudioRef = useRef(null);
 
@@ -317,12 +325,33 @@ export default function BelajarTab() {
     }
   }, [lofiVolume]);
 
+  const handleSelectRadio = (idx) => {
+    setSelectedRadioIdx(idx);
+    if (lofiAudioRef.current) {
+      const isCurrentlyPlaying = lofiPlaying;
+      lofiAudioRef.current.src = RADIO_STATIONS[idx].url;
+      lofiAudioRef.current.load();
+      if (isCurrentlyPlaying) {
+        lofiAudioRef.current.play()
+          .then(() => setLofiPlaying(true))
+          .catch(err => {
+            console.error("Gagal memutar radio Lofi:", err);
+            setLofiPlaying(false);
+            alert("Gagal memutar stasiun radio Lofi. Pastikan koneksi internet Anda aktif! 📻");
+          });
+      }
+    }
+  };
+
   const toggleLofiRadio = () => {
     if (!lofiAudioRef.current) return;
     if (lofiPlaying) {
       lofiAudioRef.current.pause();
       setLofiPlaying(false);
     } else {
+      if (!lofiAudioRef.current.src || lofiAudioRef.current.src === "") {
+        lofiAudioRef.current.src = RADIO_STATIONS[selectedRadioIdx].url;
+      }
       lofiAudioRef.current.play()
         .then(() => setLofiPlaying(true))
         .catch(err => {
@@ -813,26 +842,31 @@ export default function BelajarTab() {
             borderRadius: '10px', 
             padding: '8px 10px',
             display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '8px'
+            flexDirection: 'column',
+            gap: '4px'
           }}>
-            <button
-              className={`btn ${lofiPlaying ? 'btn-study' : 'btn-outline'}`}
-              style={{ padding: '3px 8px', fontSize: '0.62rem', height: '22px', borderRadius: '4px', cursor: 'pointer' }}
-              onClick={toggleLofiRadio}
-            >
-              {lofiPlaying ? 'PAUSE' : 'LOFI'}
-            </button>
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <Moon size={10} style={{ color: 'var(--color-study)', flexShrink: 0 }} />
-              <input 
-                type="range" min="0" max="1" step="0.05" 
-                value={lofiVolume} 
-                onChange={(e) => setLofiVolume(Number(e.target.value))}
-                style={{ flex: 1, height: '3px', background: 'var(--border-color)', borderRadius: '1.5px', outline: 'none' }}
-                disabled={!lofiPlaying}
-              />
+            <div style={{ fontSize: '0.55rem', color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontWeight: 'bold', color: 'var(--color-study)' }}>📻 {RADIO_STATIONS[selectedRadioIdx].name}</span>
+              {lofiPlaying && <span style={{ color: 'var(--color-income)', fontSize: '0.5rem', fontFamily: 'var(--font-pixel)', animation: 'cozy-breathe 1.5s infinite alternate' }}>● LIVE</span>}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+              <button
+                className={`btn ${lofiPlaying ? 'btn-study' : 'btn-outline'}`}
+                style={{ padding: '3px 8px', fontSize: '0.62rem', height: '22px', borderRadius: '4px', cursor: 'pointer' }}
+                onClick={toggleLofiRadio}
+              >
+                {lofiPlaying ? 'PAUSE' : 'LOFI'}
+              </button>
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <Moon size={10} style={{ color: 'var(--color-study)', flexShrink: 0 }} />
+                <input 
+                  type="range" min="0" max="1" step="0.05" 
+                  value={lofiVolume} 
+                  onChange={(e) => setLofiVolume(Number(e.target.value))}
+                  style={{ flex: 1, height: '3px', background: 'var(--border-color)', borderRadius: '1.5px', outline: 'none' }}
+                  disabled={!lofiPlaying}
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -1028,7 +1062,7 @@ export default function BelajarTab() {
         <div style={{ marginTop: '16px', borderTop: '1px dashed var(--border-color)', paddingTop: '14px', width: '100%', maxWidth: '280px' }}>
           <audio 
             ref={lofiAudioRef} 
-            src="https://stream.zeno.fm/fkpx419yp78uv" 
+            src={RADIO_STATIONS[selectedRadioIdx].url} 
             preload="none"
             crossOrigin="anonymous"
           />
@@ -1154,6 +1188,32 @@ export default function BelajarTab() {
                 )}
               </div>
               
+              {/* Radio Selector Dropdown */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <select
+                  value={selectedRadioIdx}
+                  onChange={(e) => handleSelectRadio(Number(e.target.value))}
+                  style={{
+                    width: '100%',
+                    fontSize: '0.65rem',
+                    padding: '4px 6px',
+                    borderRadius: '6px',
+                    background: '#09050d',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border-color)',
+                    outline: 'none',
+                    cursor: 'pointer',
+                    fontFamily: 'var(--font-modern)'
+                  }}
+                >
+                  {RADIO_STATIONS.map((station, i) => (
+                    <option key={i} value={i} style={{ background: '#130f1a' }}>
+                      {station.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' }}>
                 <button
                   className={`btn ${lofiPlaying ? 'btn-study' : 'btn-outline'}`}
